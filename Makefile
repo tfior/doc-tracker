@@ -1,3 +1,6 @@
+-include .env
+export
+
 .PHONY: dev migrate seed backend frontend
 
 dev:
@@ -10,7 +13,7 @@ frontend:
 	cd frontend && npm run dev
 
 migrate:
-	docker compose run --rm backend migrate -path /app/db/migrations -database "postgres://$(DB_USER):$(DB_PASSWORD)@db:$(DB_PORT)/$(DB_NAME)?sslmode=disable" up
+	migrate -path backend/db/migrations -database "postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=disable" up
 
 seed:
 	cd backend && go run ./cmd/seed
