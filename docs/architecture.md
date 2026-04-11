@@ -117,6 +117,6 @@ No cycles. `exports` is a leaf — nothing imports it.
 ## Migration Convention
 
 - Tool: `golang-migrate`
-- Files: numbered SQL only, e.g. `001_initial_schema.sql`, `002_add_life_events.sql`
-- No down migrations
+- Files: numbered SQL with `.up.sql` suffix, e.g. `001_initial_schema.up.sql`, `002_add_life_events.up.sql`
+- No down migrations (`.down.sql` files are not used)
 - `db/schema.sql` is kept as a current snapshot of the full schema for reference

@@ -15,8 +15,9 @@ type Config struct {
 	StorageBucket    string
 	StorageUseSSL    bool
 
-	ServerPort    string
-	SessionSecret string
+	ServerPort     string
+	SessionSecret  string
+	MigrationsPath string
 }
 
 func LoadConfig() Config {
@@ -33,8 +34,9 @@ func LoadConfig() Config {
 		StorageBucket:    getEnv("STORAGE_BUCKET", "doc-tracker"),
 		StorageUseSSL:    getEnv("STORAGE_USE_SSL", "false") == "true",
 
-		ServerPort:    getEnv("SERVER_PORT", "8080"),
-		SessionSecret: getEnv("SESSION_SECRET", "changeme"),
+		ServerPort:     getEnv("SERVER_PORT", "8080"),
+		SessionSecret:  getEnv("SESSION_SECRET", "changeme"),
+		MigrationsPath: getEnv("MIGRATIONS_PATH", "db/migrations"),
 	}
 }
 
