@@ -5,6 +5,9 @@
 | Concern | Choice | Notes |
 |---|---|---|
 | Frontend | React + TypeScript + Vite | |
+| Routing | React Router v7 | Client-side, URL-driven navigation |
+| UI components | Mantine | Attractive defaults, full-featured, no custom theming required |
+| Data fetching | TanStack Query | Server state, caching, loading/error handling |
 | Backend | Go | Modular monolith |
 | Database | PostgreSQL | Explicit SQL, no heavy ORM |
 | File storage | S3-compatible | MinIO locally, S3 in production |
