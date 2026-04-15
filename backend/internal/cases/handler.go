@@ -3,7 +3,6 @@ package cases
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/tfior/doc-tracker/platform"
 )
@@ -22,7 +21,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) listCases(w http.ResponseWriter, r *http.Request) {
-	page, perPage, ok := parsePagination(w, r)
+	page, perPage, ok := platform.ParsePagination(w, r)
 	if !ok {
 		return
 	}
@@ -55,28 +54,4 @@ func (h *Handler) getCase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	platform.JSON(w, http.StatusOK, detail)
-}
-
-func parsePagination(w http.ResponseWriter, r *http.Request) (page, perPage int, ok bool) {
-	page, perPage = 1, 50
-
-	if p := r.URL.Query().Get("page"); p != "" {
-		v, err := strconv.Atoi(p)
-		if err != nil || v < 1 {
-			platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid page")
-			return 0, 0, false
-		}
-		page = v
-	}
-
-	if p := r.URL.Query().Get("per_page"); p != "" {
-		v, err := strconv.Atoi(p)
-		if err != nil || v < 1 || v > 200 {
-			platform.Error(w, http.StatusBadRequest, "invalid_input", "per_page must be between 1 and 200")
-			return 0, 0, false
-		}
-		perPage = v
-	}
-
-	return page, perPage, true
 }

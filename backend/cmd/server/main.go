@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/tfior/doc-tracker/internal/cases"
+	"github.com/tfior/doc-tracker/internal/people"
 	"github.com/tfior/doc-tracker/platform"
 )
 
@@ -21,8 +22,9 @@ func main() {
 	defer db.Close()
 
 	casesHandler := cases.NewHandler(cases.NewService(cases.NewStore(db)))
+	peopleHandler := people.NewHandler(people.NewService(people.NewStore(db)))
 
-	srv := platform.NewServer(cfg, db, casesHandler)
+	srv := platform.NewServer(cfg, db, casesHandler, peopleHandler)
 
 	log.Printf("server listening on :%s", cfg.ServerPort)
 	if err := srv.Start(); err != nil {
