@@ -6,27 +6,31 @@ import (
 	"net/http"
 )
 
+// RouteRegistrar is implemented by each feature module's handler.
+type RouteRegistrar interface {
+	RegisterRoutes(mux *http.ServeMux)
+}
+
 type Server struct {
 	cfg Config
 	db  *sql.DB
 	mux *http.ServeMux
 }
 
-func NewServer(cfg Config, db *sql.DB) *Server {
+func NewServer(cfg Config, db *sql.DB, registrars ...RouteRegistrar) *Server {
 	s := &Server{
 		cfg: cfg,
 		db:  db,
 		mux: http.NewServeMux(),
 	}
-	s.registerRoutes()
-	return s
-}
-
-func (s *Server) registerRoutes() {
-	s.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+	for _, r := range registrars {
+		r.RegisterRoutes(s.mux)
+	}
+	return s
 }
 
 func (s *Server) Start() error {
