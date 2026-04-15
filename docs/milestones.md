@@ -62,26 +62,26 @@ Giuseppe Rossi (LIRA, born Italy, naturalized USA after Antonio's birth)
 
 ### Backend
 
-- [ ] Initial migration — full schema for all entities including DocumentStatus seed data
-- [ ] Seed script with the Rossi → Martini case
-- [ ] `GET /api/v1/cases` — list all cases
-- [ ] `GET /api/v1/cases/:caseId` — case detail including ClaimLine summary and progress counts
-- [ ] `GET /api/v1/cases/:caseId/claim-lines` — list ClaimLines for a case
-- [ ] `GET /api/v1/cases/:caseId/people` — list People for a case
-- [ ] `GET /api/v1/cases/:caseId/life-events` — list LifeEvents for a case, flagged if no documents
-- [ ] `GET /api/v1/cases/:caseId/documents` — list Documents for a case with status and progress_bucket
+- [x] Initial migration — full schema for all entities including DocumentStatus seed data
+- [x] Seed script with the Rossi → Martini case
+- [x] `GET /api/v1/cases` — list all cases
+- [x] `GET /api/v1/cases/:caseId` — case detail including ClaimLine summary and progress counts
+- [x] `GET /api/v1/cases/:caseId/claim-lines` — list ClaimLines for a case
+- [x] `GET /api/v1/cases/:caseId/people` — list People for a case
+- [x] `GET /api/v1/cases/:caseId/life-events` — list LifeEvents for a case, flagged if no documents
+- [x] `GET /api/v1/cases/:caseId/documents` — list Documents for a case with status and progress_bucket
 
 ### Frontend
 
-- [ ] Case list page — shows all cases with title and status
-- [ ] Case overview page — ClaimLine status summary, document progress breakdown by bucket (not_started / in_progress / complete), LifeEvents with no associated documents flagged
-- [ ] People page — flat list of people in the case
-- [ ] Documents page — list of documents with status and verification state
+- [x] Case list page — shows all cases with title and status
+- [x] Case overview page — ClaimLine status summary, document progress breakdown by bucket (not_started / in_progress / complete), LifeEvents with no associated documents flagged
+- [x] People page — flat list of people in the case
+- [x] Documents page — list of documents with status and verification state
 
 ### Infrastructure
 
-- [ ] Docker Compose with PostgreSQL and MinIO
-- [ ] Go server with `platform/` wired, `golang-migrate` running on startup
-- [ ] Vite dev server proxying API requests to Go backend
-- [ ] `.env.example` with all required variables documented
-- [ ] `Makefile` with at minimum: `dev`, `migrate`, `seed` targets
+- [x] Docker Compose with PostgreSQL and MinIO
+- [x] Go server with `platform/` wired, `golang-migrate` running on startup
+- [x] Vite dev server proxying API requests to Go backend
+- [x] `.env.example` with all required variables documented
+- [x] `Makefile` with at minimum: `dev`, `migrate`, `seed` targets
