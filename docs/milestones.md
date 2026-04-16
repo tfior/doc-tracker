@@ -85,3 +85,51 @@ Giuseppe Rossi (LIRA, born Italy, naturalized USA after Antonio's birth)
 - [x] Vite dev server proxying API requests to Go backend
 - [x] `.env.example` with all required variables documented
 - [x] `Makefile` with at minimum: `dev`, `migrate`, `seed` targets
+
+---
+
+## Milestone 2 — "I can create and manage a case"
+
+Authentication and full write operations. After this milestone the app is a functional case management tool — a user can log in and build a case from scratch.
+
+### Acceptance Criteria
+
+- All routes (API and frontend) are protected; unauthenticated requests redirect to login
+- A user can log in and log out
+- A user can create, edit, and archive a case
+- A user can add, edit, and remove people from a case
+- A user can define parent-child relationships between people
+- A user can add, edit, and remove life events
+- A user can add, edit, and remove documents (metadata only — no file upload yet)
+- A user can manually transition a document's status
+- A user can create and update claim lines
+- No file upload, no ZIP export
+
+### Backend
+
+- [ ] `auth` module: login, logout, session middleware; credentials from env vars (single-owner, no registration)
+- [ ] Auth middleware applied to all `/api/v1` routes
+- [ ] `POST /api/v1/cases`, `PATCH /api/v1/cases/:caseId`, `DELETE /api/v1/cases/:caseId`
+- [ ] `POST /api/v1/cases/:caseId/people`, `PATCH /api/v1/cases/:caseId/people/:personId`, `DELETE /api/v1/cases/:caseId/people/:personId`
+- [ ] `POST /api/v1/cases/:caseId/people/:personId/relationships`, `DELETE /api/v1/cases/:caseId/people/:personId/relationships/:parentId`
+- [ ] `POST /api/v1/cases/:caseId/life-events`, `PATCH /api/v1/cases/:caseId/life-events/:eventId`, `DELETE /api/v1/cases/:caseId/life-events/:eventId`
+- [ ] `POST /api/v1/cases/:caseId/documents`, `PATCH /api/v1/cases/:caseId/documents/:docId`, `DELETE /api/v1/cases/:caseId/documents/:docId`
+- [ ] `PATCH /api/v1/cases/:caseId/documents/:docId/status` — manual status transition
+- [ ] `POST /api/v1/cases/:caseId/claim-lines`, `PATCH /api/v1/cases/:caseId/claim-lines/:lineId`, `DELETE /api/v1/cases/:caseId/claim-lines/:lineId`
+
+### Frontend
+
+- [ ] Login page and logout action
+- [ ] Auth-aware routing — redirect to login if no active session
+- [ ] Create and edit case forms
+- [ ] Add, edit, and remove person forms
+- [ ] Parent-child relationship UI
+- [ ] Add, edit, and remove life event forms
+- [ ] Add, edit, and remove document forms
+- [ ] Document status transition UI
+- [ ] Claim line create and status management UI
+
+### Infrastructure
+
+- [ ] `SESSION_SECRET` added to `.env.example`
+- [ ] Sessions stored server-side in memory (database-backed sessions deferred)

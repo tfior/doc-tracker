@@ -117,6 +117,17 @@ No cycles. `exports` is a leaf — nothing imports it.
 - `platform/` is pure infrastructure — server setup, config, DB pool. No business logic.
 - Frontend feature structure mirrors backend module structure. A feature change touches predictable files in both.
 
+## Deployment Portability
+
+The app is intended to be self-hostable on any stack. To preserve this:
+
+- All infrastructure configuration (database, storage, ports) is read from environment variables. No provider-specific values are hardcoded.
+- The `storage` module speaks the S3 API only. It must remain behind an interface so alternative backends can be substituted without touching application code.
+- Deployment reference files (e.g. `Caddyfile`, `docker-compose.prod.yml`) live in the repo as examples, not requirements.
+- No Hetzner-specific, Cloudflare-specific, or any other provider-specific managed services are used inside the application layer.
+
+The reference production stack (Hetzner VPS + Caddy + Cloudflare R2) is one valid deployment target, not the only one.
+
 ## Migration Convention
 
 - Tool: `golang-migrate`
