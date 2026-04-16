@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: dev migrate seed create-user backend frontend
+.PHONY: dev migrate seed create-user test backend frontend
 
 dev:
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up db minio
@@ -20,3 +20,6 @@ seed:
 
 create-user:
 	cd backend && go run ./cmd/create-user
+
+test: ## requires 'make dev' (postgres) to be running
+	cd backend && go test ./...
