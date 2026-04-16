@@ -3,6 +3,18 @@
 
 -- Enums
 
+CREATE TYPE activity_action AS ENUM ('created', 'updated', 'deleted');
+
+CREATE TYPE activity_entity_type AS ENUM (
+    'case',
+    'person',
+    'person_relationship',
+    'life_event',
+    'document',
+    'file_attachment',
+    'claim_line'
+);
+
 CREATE TYPE case_status AS ENUM ('active', 'archived', 'complete');
 
 CREATE TYPE claim_line_status AS ENUM ('active', 'suspended', 'eliminated', 'confirmed');
@@ -19,6 +31,16 @@ CREATE TYPE document_system_key AS ENUM ('pending', 'collected', 'verified', 'un
 
 
 -- Tables
+
+CREATE TABLE users (
+    id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    email         TEXT        NOT NULL UNIQUE,
+    first_name    TEXT        NOT NULL,
+    last_name     TEXT        NOT NULL,
+    password_hash TEXT        NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE cases (
     id                     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -117,4 +139,16 @@ CREATE TABLE file_attachments (
     superseded_at   TIMESTAMPTZ,
     notes           TEXT,
     uploaded_at     TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE activity_logs (
+    id          UUID                 PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id     UUID                 NOT NULL REFERENCES cases(id),
+    user_id     UUID                 NOT NULL REFERENCES users(id),
+    action      activity_action      NOT NULL,
+    entity_type activity_entity_type NOT NULL,
+    entity_id   UUID                 NOT NULL,
+    entity_name TEXT                 NOT NULL,
+    changes     JSONB,
+    created_at  TIMESTAMPTZ          NOT NULL DEFAULT NOW()
 );
