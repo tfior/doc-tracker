@@ -12,16 +12,18 @@ type RouteRegistrar interface {
 }
 
 type Server struct {
-	cfg Config
-	db  *sql.DB
-	mux *http.ServeMux
+	cfg        Config
+	db         *sql.DB
+	mux        *http.ServeMux
+	middleware func(http.Handler) http.Handler
 }
 
-func NewServer(cfg Config, db *sql.DB, registrars ...RouteRegistrar) *Server {
+func NewServer(cfg Config, db *sql.DB, middleware func(http.Handler) http.Handler, registrars ...RouteRegistrar) *Server {
 	s := &Server{
-		cfg: cfg,
-		db:  db,
-		mux: http.NewServeMux(),
+		cfg:        cfg,
+		db:         db,
+		mux:        http.NewServeMux(),
+		middleware: middleware,
 	}
 	s.mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -34,5 +36,9 @@ func NewServer(cfg Config, db *sql.DB, registrars ...RouteRegistrar) *Server {
 }
 
 func (s *Server) Start() error {
-	return http.ListenAndServe(fmt.Sprintf(":%s", s.cfg.ServerPort), s.mux)
+	var handler http.Handler = s.mux
+	if s.middleware != nil {
+		handler = s.middleware(handler)
+	}
+	return http.ListenAndServe(fmt.Sprintf(":%s", s.cfg.ServerPort), handler)
 }

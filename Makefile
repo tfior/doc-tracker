@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: dev migrate seed backend frontend
+.PHONY: dev migrate seed create-user backend frontend
 
 dev:
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up
@@ -17,3 +17,6 @@ migrate:
 
 seed:
 	cd backend && go run ./cmd/seed
+
+create-user:
+	cd backend && go run ./cmd/create-user
