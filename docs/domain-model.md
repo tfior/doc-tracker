@@ -2,6 +2,38 @@
 
 ## Entities
 
+### User
+An authenticated user of the application. All users have shared access to all cases — no per-user permissions or workspaces for MVP. Users are created via a CLI command, not through a registration flow.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| email | text | unique; used as login identifier |
+| first_name | text | |
+| last_name | text | |
+| password_hash | text | bcrypt |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+---
+
+### ActivityLog
+An append-only record of a write action performed by a user. Captured on every create, update, and delete across all case-scoped entities. Display (activity feed UI) is deferred post-MVP; data capture is required from Milestone 2 onward.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| case_id | uuid | FK → Case |
+| user_id | uuid | FK → User |
+| action | enum | created, updated, deleted |
+| entity_type | enum | case, person, person_relationship, life_event, document, file_attachment, claim_line |
+| entity_id | uuid | ID of the affected entity |
+| entity_name | text | Human-readable label at the time of the action (e.g. "Birth life event for Giuseppe Rossi", "Italian Birth Certificate") |
+| changes | jsonb? | Field-level diffs for updates: `[{"field": "first_name", "from": "Mario", "to": "Luigi"}]`; null for created and deleted |
+| created_at | timestamp | |
+
+---
+
 ### Case
 The top-level container for a document collection effort. One case may have multiple applicants and multiple candidate lineage lines.
 
@@ -175,20 +207,26 @@ A physical file attached to a Document. One attachment is marked canonical at an
 12. System DocumentStatus entries cannot be edited or deleted by users.
 13. Files are uploaded directly to object storage via the backend using multipart form upload. Presigned URLs are not used for MVP.
 14. Object storage buckets must have server-side encryption (SSE) enabled. This is a deployment requirement, not enforced in application code.
+15. ActivityLog entries are append-only. They are never updated or deleted.
+16. `ActivityLog.entity_name` is captured at the time of the action and is not updated if the entity is later renamed or deleted.
+17. `ActivityLog.changes` stores field-level diffs for `updated` actions only; null for `created` and `deleted`.
+18. Activity log entries are written for all write operations on case-scoped entities (cases, people, person relationships, life events, documents, file attachments, claim lines).
 
 ---
 
 ## MoSCoW
 
 ### Must (MVP)
-- Case, ClaimLine, Person, PersonRelationship, LifeEvent, Document, FileAttachment, DocumentStatus
-- Authentication (single-owner, session-based)
+- User, Case, ClaimLine, Person, PersonRelationship, LifeEvent, Document, FileAttachment, DocumentStatus, ActivityLog
+- Multi-user authentication (shared access, all users see all data, no per-user permissions); session-based
+- Activity log data capture on all write operations (display deferred)
 - File upload to S3-compatible storage via multipart form, server-side encryption at rest
 - Case overview and progress tracking (ClaimLine status + document progress buckets + LifeEvents without documents)
 - ZIP export of canonical files per case
 - ZIP export of all files per case
 
 ### Could (post-MVP)
+- Activity feed UI (per-case feed; per-entity feed)
 - Checklist/Task entity for lightweight user-driven progress tracking
 - Admin UI for managing user-defined DocumentStatus entries
 - Async export job records with file manifest
@@ -200,10 +238,11 @@ A physical file attached to a Document. One attachment is marked canonical at an
 - Second case type for eligibility workflow
 - Automatic discrepancy flagging across documents
 - Presigned URL upload flow (if direct upload becomes a bottleneck)
+- User registration flow
 
 ### Won't (MVP)
 - RequirementSpec / CaseRequirement — adds complexity for little MVP benefit; checklist covers the need
-- Multi-user collaboration
+- Per-user permissions, workspaces, or case assignments
 - Public sharing portals
 - Google Drive / GEDCOM / GRAMPS integration
 - Full family tree builder

@@ -107,7 +107,10 @@ Authentication and full write operations. After this milestone the app is a func
 
 ### Backend
 
-- [ ] `auth` module: login, logout, session middleware; credentials from env vars (single-owner, no registration)
+- [ ] Migration for `users` table
+- [ ] Migration for `activity_logs` table
+- [ ] `users` module: User model, store, service; bcrypt password hashing
+- [ ] `auth` module: login, logout, session middleware; authentication against `users` table
 - [ ] Auth middleware applied to all `/api/v1` routes
 - [ ] `POST /api/v1/cases`, `PATCH /api/v1/cases/:caseId`, `DELETE /api/v1/cases/:caseId`
 - [ ] `POST /api/v1/cases/:caseId/people`, `PATCH /api/v1/cases/:caseId/people/:personId`, `DELETE /api/v1/cases/:caseId/people/:personId`
@@ -116,6 +119,7 @@ Authentication and full write operations. After this milestone the app is a func
 - [ ] `POST /api/v1/cases/:caseId/documents`, `PATCH /api/v1/cases/:caseId/documents/:docId`, `DELETE /api/v1/cases/:caseId/documents/:docId`
 - [ ] `PATCH /api/v1/cases/:caseId/documents/:docId/status` — manual status transition
 - [ ] `POST /api/v1/cases/:caseId/claim-lines`, `PATCH /api/v1/cases/:caseId/claim-lines/:lineId`, `DELETE /api/v1/cases/:caseId/claim-lines/:lineId`
+- [ ] Activity log insertion in all write handlers (create, update, delete)
 
 ### Frontend
 
@@ -131,5 +135,5 @@ Authentication and full write operations. After this milestone the app is a func
 
 ### Infrastructure
 
-- [ ] `SESSION_SECRET` added to `.env.example`
 - [ ] Sessions stored server-side in memory (database-backed sessions deferred)
+- [ ] `make create-user` target — prompts for email, first name, last name, password; inserts a new user record; separate from seed data
