@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: doctracker
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: doctracker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Run tests
+        working-directory: backend
+        run: go test ./...
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: doctracker
+          DB_PASSWORD: ci
+          TEST_DB_NAME: doctracker_test
