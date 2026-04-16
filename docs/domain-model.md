@@ -45,6 +45,7 @@ The top-level container for a document collection effort. One case may have mult
 | primary_root_person_id | uuid? | FK → Person; nullable until LIRA is confirmed |
 | created_at | timestamp | |
 | updated_at | timestamp | |
+| deleted_at | timestamp? | null = active; set = trashed |
 
 ---
 
@@ -60,11 +61,12 @@ One candidate lineage path through the case's person graph. Always present, even
 | notes | text? | |
 | created_at | timestamp | |
 | updated_at | timestamp | |
+| deleted_at | timestamp? | null = active; set = trashed |
 
 ---
 
 ### Person
-A person in the lineage graph, scoped per case for MVP. `first_name` and `last_name` are working identity — not verified facts. Verified name data lives on Document.
+A person in the lineage graph, scoped per case for MVP. `first_name` and `last_name` are working identity — not verified facts. Verified name data lives on Document. Persons cannot be reassigned across Cases.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -78,6 +80,7 @@ A person in the lineage graph, scoped per case for MVP. `first_name` and `last_n
 | notes | text? | |
 | created_at | timestamp | |
 | updated_at | timestamp | |
+| deleted_at | timestamp? | null = active; set = trashed |
 
 **Deferred:** `canonical_person_id` (nullable FK → Person) for cross-case linking. Add when needed.
 
@@ -85,6 +88,8 @@ A person in the lineage graph, scoped per case for MVP. `first_name` and `last_n
 
 ### PersonRelationship
 Parent-child relationships only. Supports multiple parents per person to handle branching lineage lines. Marriages and other relationships are captured via LifeEvent, not here.
+
+PersonRelationship is a bare join table with no soft-delete. Deletions are hard-deletes; the user re-adds the relationship if removed by mistake. The UI exposes a **Parents** field per Person (up to 2 selectable People within the same Case) and a **Children** field (unlimited). Circular reference validation (ancestor/descendant cycles) is enforced in the application layer.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -97,11 +102,13 @@ Parent-child relationships only. Supports multiple parents per person to handle 
 ### LifeEvent
 A significant event in a person's life that may require one or more documents to prove. The in-line subject (`person_id`) is the lineage-relevant person. Spouse data is stored as flat fields — spouses are not Person records in the graph.
 
+A LifeEvent may be reassigned to a different Person within the same Case. Cross-case reassignment is not permitted.
+
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid | |
 | case_id | uuid | FK → Case |
-| person_id | uuid | FK → Person (in-line subject) |
+| person_id | uuid | FK → Person (in-line subject); reassignable within same Case |
 | event_type | enum | birth, marriage, death, naturalization, immigration, other |
 | event_date | date? | |
 | event_place | text? | |
@@ -111,6 +118,7 @@ A significant event in a person's life that may require one or more documents to
 | notes | text? | |
 | created_at | timestamp | |
 | updated_at | timestamp | |
+| deleted_at | timestamp? | null = active; set = trashed |
 
 ---
 
@@ -146,12 +154,14 @@ A specific official record belonging to a Person, optionally grouped under a Lif
 
 The system automatically transitions `status` to `collected` when a canonical FileAttachment is first uploaded. All other status transitions are manual.
 
+A Document may be reassigned to a different LifeEvent within the same Case, including one belonging to a different Person. When reassigned cross-person, `person_id` and `life_event_id` are updated atomically. Setting `life_event_id` to null ungrouped the Document under the Person with no event association.
+
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid | |
 | case_id | uuid | FK → Case |
-| person_id | uuid | FK → Person |
-| life_event_id | uuid? | FK → LifeEvent |
+| person_id | uuid | FK → Person; updated atomically when reassigned to an event under a different Person |
+| life_event_id | uuid? | FK → LifeEvent; null = ungrouped; reassignable within same Case |
 | status_id | uuid | FK → DocumentStatus; default: pending system status |
 | document_type | enum | birth_certificate, marriage_certificate, naturalization, death_certificate, other |
 | title | text | |
@@ -167,6 +177,7 @@ The system automatically transitions `status` to `collected` when a canonical Fi
 | notes | text? | AKA variants, discrepancies, amendment history narrative |
 | created_at | timestamp | |
 | updated_at | timestamp | |
+| deleted_at | timestamp? | null = active; set = trashed |
 
 ---
 
@@ -211,6 +222,27 @@ A physical file attached to a Document. One attachment is marked canonical at an
 16. `ActivityLog.entity_name` is captured at the time of the action and is not updated if the entity is later renamed or deleted.
 17. `ActivityLog.changes` stores field-level diffs for `updated` actions only; null for `created` and `deleted`.
 18. Activity log entries are written for all write operations on case-scoped entities (cases, people, person relationships, life events, documents, file attachments, claim lines).
+
+### Soft-delete and Trash
+
+19. Case, Person, LifeEvent, Document, and ClaimLine have a `deleted_at` column. A null value means active; a non-null value means trashed. PersonRelationship and FileAttachment have no soft-delete.
+20. All read queries filter `WHERE deleted_at IS NULL`. Trashed entities are excluded from normal results and only appear in the trash view.
+21. Only directly-deleted entities appear in the trash. Children of a trashed entity are hidden implicitly — their own `deleted_at` remains null and they do not appear in the trash independently.
+22. A trashed entity and all its implicitly-hidden children are frozen: no edits, no reassignment, no new children may be added until the parent is restored.
+23. Restoring a trashed entity automatically restores all implicitly-hidden children (they were never independently deleted).
+24. Trashed entities are permanently hard-deleted after 30 days. All descendant entities are permanently deleted via DB-level `ON DELETE CASCADE` foreign keys.
+25. If a LifeEvent is permanently deleted, its Documents are also permanently deleted (CASCADE). If the user wants a Document to survive the deletion of its LifeEvent, they must reassign the Document to another event (or ungroup it) before deleting the event.
+26. If a user explicitly deletes a child entity while its parent is still active (e.g., deletes a Document while the Person and LifeEvent are active), that child appears in the trash independently and follows its own 30-day clock.
+27. PersonRelationship uses hard-delete only. Deleted relationships are gone immediately with no trash period.
+
+### Reassignment
+
+28. A LifeEvent may be reassigned to a different Person within the same Case. Cross-case reassignment is not permitted.
+29. A Document may be reassigned to a different LifeEvent within the same Case, including one belonging to a different Person. When the target event belongs to a different Person, `person_id` and `life_event_id` are updated atomically in a single transaction.
+30. A Document's `life_event_id` may be set to null to ungroup it from any event, leaving it associated with its Person only.
+31. Reassignment is not permitted if the entity being moved or its target parent is trashed.
+32. Reassignment is logged as an `updated` action in ActivityLog with the old and new parent ID(s) captured in `changes`.
+33. PersonRelationship graph validation is enforced in the application layer: a Person may have at most 2 parents, and no Person may be both a direct ancestor and a direct descendant of the same Person (no circular relationships).
 
 ---
 
