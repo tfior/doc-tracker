@@ -9,6 +9,7 @@ import (
 	"github.com/tfior/doc-tracker/internal/documents"
 	"github.com/tfior/doc-tracker/internal/lifeevents"
 	"github.com/tfior/doc-tracker/internal/people"
+	"github.com/tfior/doc-tracker/internal/trash"
 	"github.com/tfior/doc-tracker/internal/users"
 	"github.com/tfior/doc-tracker/platform"
 )
@@ -37,6 +38,7 @@ func main() {
 		claimlines.NewHandler(claimlines.NewService(claimlines.NewStore(db))),
 		lifeevents.NewHandler(lifeevents.NewService(lifeevents.NewStore(db))),
 		documents.NewHandler(documents.NewService(documents.NewStore(db))),
+		trash.NewHandler(trash.NewService(trash.NewStore(db))),
 	)
 
 	log.Printf("server listening on :%s", cfg.ServerPort)
