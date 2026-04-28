@@ -88,6 +88,15 @@ func TruncateUsers(t *testing.T, db *sql.DB) {
 	}
 }
 
+// TruncateCases removes all rows from the cases table, cascading to all
+// case-scoped entities (people, claim_lines, life_events, documents, activity_logs).
+func TruncateCases(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec("TRUNCATE TABLE cases CASCADE"); err != nil {
+		t.Fatalf("truncate cases: %v", err)
+	}
+}
+
 // createTestDBIfNotExists connects to the postgres system database and
 // creates the test database if it does not already exist.
 func createTestDBIfNotExists(t *testing.T, host, port, user, password, dbName string) {
