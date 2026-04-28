@@ -50,14 +50,14 @@ The top-level container for a document collection effort. One case may have mult
 ---
 
 ### ClaimLine
-One candidate lineage path through the case's person graph. Always present, even for simple single-LIRA cases (status: confirmed). Supports mid-case pivots and multi-line eligibility research without structural rebuilds.
+One candidate lineage path through the case's person graph. Always present, even for simple single-LIRA cases (status: eligible). Supports mid-case pivots and multi-line eligibility research without structural rebuilds.
 
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid | |
 | case_id | uuid | FK → Case |
-| root_person_id | uuid | FK → Person |
-| status | enum | active, suspended, eliminated, confirmed |
+| root_person_id | uuid | FK → Person; immutable after creation |
+| status | enum | not_yet_researched, researching, paused, ineligible, eligible |
 | notes | text? | |
 | created_at | timestamp | |
 | updated_at | timestamp | |

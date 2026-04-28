@@ -12,11 +12,12 @@ type Case struct {
 }
 
 type ClaimLineSummary struct {
-	Total      int `json:"total"`
-	Active     int `json:"active"`
-	Suspended  int `json:"suspended"`
-	Eliminated int `json:"eliminated"`
-	Confirmed  int `json:"confirmed"`
+	Total            int `json:"total"`
+	NotYetResearched int `json:"not_yet_researched"`
+	Researching      int `json:"researching"`
+	Paused           int `json:"paused"`
+	Ineligible       int `json:"ineligible"`
+	Eligible         int `json:"eligible"`
 }
 
 type DocumentProgress struct {

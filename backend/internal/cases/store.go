@@ -75,10 +75,11 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 			c.primary_root_person_id::text,
 			c.created_at,
 			c.updated_at,
-			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'active')     AS cl_active,
-			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'suspended')  AS cl_suspended,
-			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'eliminated') AS cl_eliminated,
-			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'confirmed')  AS cl_confirmed,
+			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'not_yet_researched') AS cl_not_yet_researched,
+			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'researching')       AS cl_researching,
+			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'paused')            AS cl_paused,
+			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'ineligible')        AS cl_ineligible,
+			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'eligible')          AS cl_eligible,
 			COUNT(DISTINCT d.id)  FILTER (WHERE ds.progress_bucket = 'not_started') AS doc_not_started,
 			COUNT(DISTINCT d.id)  FILTER (WHERE ds.progress_bucket = 'in_progress') AS doc_in_progress,
 			COUNT(DISTINCT d.id)  FILTER (WHERE ds.progress_bucket = 'complete')    AS doc_complete
@@ -91,8 +92,8 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 		caseID,
 	).Scan(
 		&d.ID, &d.Title, &d.Status, &primaryRootPersonID, &d.CreatedAt, &d.UpdatedAt,
-		&d.ClaimLineSummary.Active, &d.ClaimLineSummary.Suspended,
-		&d.ClaimLineSummary.Eliminated, &d.ClaimLineSummary.Confirmed,
+		&d.ClaimLineSummary.NotYetResearched, &d.ClaimLineSummary.Researching,
+		&d.ClaimLineSummary.Paused, &d.ClaimLineSummary.Ineligible, &d.ClaimLineSummary.Eligible,
 		&d.DocumentProgress.NotStarted, &d.DocumentProgress.InProgress, &d.DocumentProgress.Complete,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -105,8 +106,8 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 	if primaryRootPersonID.Valid {
 		d.PrimaryRootPersonID = &primaryRootPersonID.String
 	}
-	d.ClaimLineSummary.Total = d.ClaimLineSummary.Active + d.ClaimLineSummary.Suspended +
-		d.ClaimLineSummary.Eliminated + d.ClaimLineSummary.Confirmed
+	d.ClaimLineSummary.Total = d.ClaimLineSummary.NotYetResearched + d.ClaimLineSummary.Researching +
+		d.ClaimLineSummary.Paused + d.ClaimLineSummary.Ineligible + d.ClaimLineSummary.Eligible
 
 	return &d, nil
 }

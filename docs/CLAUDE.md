@@ -48,4 +48,4 @@ IMPORTANT: Only update these files (including this CLAUDE.md file) after permiss
 - `is_verified` on Document flips to false when an amendment is uploaded; stays true for apostille and translation uploads
 - Spouse data lives on the marriage LifeEvent as flat fields — spouses are not Person records in the lineage graph
 - PersonRelationship is parent-child only — no other relationship types
-- ClaimLine is always present, even for single-LIRA cases (status: confirmed)
+- ClaimLine is always present, even for single-LIRA cases (status: eligible)

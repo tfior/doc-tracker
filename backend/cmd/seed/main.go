@@ -132,7 +132,7 @@ func seed(db *sql.DB) error {
 	// ClaimLine and case LIRA
 	// -------------------------------------------------------------------------
 
-	s.exec(`INSERT INTO claim_lines (case_id, root_person_id, status) VALUES ($1, $2, 'confirmed')`, caseID, giuseppeID)
+	s.exec(`INSERT INTO claim_lines (case_id, root_person_id, status) VALUES ($1, $2, 'eligible')`, caseID, giuseppeID)
 	s.exec(`UPDATE cases SET primary_root_person_id = $1 WHERE id = $2`, giuseppeID, caseID)
 
 	// -------------------------------------------------------------------------

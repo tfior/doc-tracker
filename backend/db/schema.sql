@@ -17,7 +17,7 @@ CREATE TYPE activity_entity_type AS ENUM (
 
 CREATE TYPE case_status AS ENUM ('active', 'archived', 'complete');
 
-CREATE TYPE claim_line_status AS ENUM ('active', 'suspended', 'eliminated', 'confirmed');
+CREATE TYPE claim_line_status AS ENUM ('not_yet_researched', 'researching', 'paused', 'ineligible', 'eligible');
 
 CREATE TYPE life_event_type AS ENUM ('birth', 'marriage', 'death', 'naturalization', 'immigration', 'other');
 
@@ -77,7 +77,7 @@ CREATE TABLE claim_lines (
     id             UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
     case_id        UUID              NOT NULL REFERENCES cases(id)  ON DELETE CASCADE,
     root_person_id UUID              NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-    status         claim_line_status NOT NULL DEFAULT 'active',
+    status         claim_line_status NOT NULL DEFAULT 'not_yet_researched',
     notes          TEXT,
     created_at     TIMESTAMPTZ       NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMPTZ       NOT NULL DEFAULT NOW(),
