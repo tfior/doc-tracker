@@ -28,7 +28,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	svc := cases.NewService(store)
 
 	mux := http.NewServeMux()
-	cases.NewHandler(svc).RegisterRoutes(mux)
+	cases.NewHandler(svc, nil).RegisterRoutes(mux)
 
 	return &testEnv{svc: svc, mux: mux}
 }

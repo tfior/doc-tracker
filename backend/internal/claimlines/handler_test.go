@@ -33,7 +33,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	clSvc := claimlines.NewService(claimlines.NewStore(db))
 
 	mux := http.NewServeMux()
-	claimlines.NewHandler(clSvc).RegisterRoutes(mux)
+	claimlines.NewHandler(clSvc, nil).RegisterRoutes(mux)
 
 	return &testEnv{svc: clSvc, casesSvc: casesSvc, peopleSvc: peopleSvc, mux: mux}
 }

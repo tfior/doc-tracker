@@ -42,11 +42,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	trashSvc := trash.NewService(trash.NewStore(db))
 
 	mux := http.NewServeMux()
-	cases.NewHandler(casesSvc).RegisterRoutes(mux)
-	people.NewHandler(peopleSvc).RegisterRoutes(mux)
-	lifeevents.NewHandler(leSvc).RegisterRoutes(mux)
-	documents.NewHandler(docSvc).RegisterRoutes(mux)
-	claimlines.NewHandler(clSvc).RegisterRoutes(mux)
+	cases.NewHandler(casesSvc, nil).RegisterRoutes(mux)
+	people.NewHandler(peopleSvc, nil).RegisterRoutes(mux)
+	lifeevents.NewHandler(leSvc, nil).RegisterRoutes(mux)
+	documents.NewHandler(docSvc, nil).RegisterRoutes(mux)
+	claimlines.NewHandler(clSvc, nil).RegisterRoutes(mux)
 	trash.NewHandler(trashSvc).RegisterRoutes(mux)
 
 	return &testEnv{

@@ -148,7 +148,7 @@ CREATE TABLE file_attachments (
 
 CREATE TABLE activity_logs (
     id          UUID                 PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id     UUID                 NOT NULL REFERENCES cases(id),
+    case_id     UUID                 NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
     user_id     UUID                 NOT NULL REFERENCES users(id),
     action      activity_action      NOT NULL,
     entity_type activity_entity_type NOT NULL,

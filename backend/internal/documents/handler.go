@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/tfior/doc-tracker/internal/activitylog"
+	"github.com/tfior/doc-tracker/internal/auth"
 	"github.com/tfior/doc-tracker/platform"
 )
 
@@ -14,11 +16,21 @@ var validDocumentTypes = map[string]bool{
 }
 
 type Handler struct {
-	svc *Service
+	svc    *Service
+	actlog *activitylog.Service
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, actlog *activitylog.Service) *Handler {
+	return &Handler{svc: svc, actlog: actlog}
+}
+
+func (h *Handler) log(r *http.Request, p activitylog.InsertParams) {
+	if h.actlog == nil {
+		return
+	}
+	userID, _ := auth.UserIDFromContext(r.Context())
+	p.UserID = userID
+	_ = h.actlog.Insert(r.Context(), p)
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -112,6 +124,10 @@ func (h *Handler) createDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log(r, activitylog.InsertParams{
+		CaseID: caseID, Action: "created", EntityType: "document",
+		EntityID: d.ID, EntityName: d.Title,
+	})
 	platform.JSON(w, http.StatusCreated, d)
 }
 
@@ -169,6 +185,37 @@ func (h *Handler) updateDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var changes []activitylog.FieldChange
+	if body.Title != nil {
+		changes = append(changes, activitylog.FieldChange{Field: "title", To: *body.Title})
+	}
+	if body.DocumentType != nil {
+		changes = append(changes, activitylog.FieldChange{Field: "document_type", To: *body.DocumentType})
+	}
+	if body.IsVerified != nil {
+		changes = append(changes, activitylog.FieldChange{Field: "is_verified", To: *body.IsVerified})
+	}
+	for _, f := range []struct {
+		ns    platform.NullString
+		field string
+	}{
+		{body.IssuingAuthority, "issuing_authority"}, {body.IssueDate, "issue_date"},
+		{body.RecordedDate, "recorded_date"}, {body.RecordedGivenName, "recorded_given_name"},
+		{body.RecordedSurname, "recorded_surname"}, {body.RecordedBirthDate, "recorded_birth_date"},
+		{body.RecordedBirthPlace, "recorded_birth_place"}, {body.Notes, "notes"},
+	} {
+		if f.ns.Set {
+			var val interface{}
+			if f.ns.Valid {
+				val = f.ns.Value
+			}
+			changes = append(changes, activitylog.FieldChange{Field: f.field, To: val})
+		}
+	}
+	h.log(r, activitylog.InsertParams{
+		CaseID: caseID, Action: "updated", EntityType: "document",
+		EntityID: d.ID, EntityName: d.Title, Changes: changes,
+	})
 	platform.JSON(w, http.StatusOK, d)
 }
 
@@ -186,6 +233,10 @@ func (h *Handler) deleteDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log(r, activitylog.InsertParams{
+		CaseID: caseID, Action: "deleted", EntityType: "document",
+		EntityID: docID, EntityName: docID,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -215,6 +266,11 @@ func (h *Handler) transitionStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log(r, activitylog.InsertParams{
+		CaseID: caseID, Action: "updated", EntityType: "document",
+		EntityID: d.ID, EntityName: d.Title,
+		Changes: []activitylog.FieldChange{{Field: "status", To: body.StatusKey}},
+	})
 	platform.JSON(w, http.StatusOK, d)
 }
 
@@ -250,6 +306,18 @@ func (h *Handler) reassignDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	changes := []activitylog.FieldChange{{Field: "person_id", To: body.PersonID}}
+	if body.LifeEventID.Set {
+		var val interface{}
+		if body.LifeEventID.Valid {
+			val = body.LifeEventID.Value
+		}
+		changes = append(changes, activitylog.FieldChange{Field: "life_event_id", To: val})
+	}
+	h.log(r, activitylog.InsertParams{
+		CaseID: caseID, Action: "updated", EntityType: "document",
+		EntityID: d.ID, EntityName: d.Title, Changes: changes,
+	})
 	platform.JSON(w, http.StatusOK, d)
 }
 

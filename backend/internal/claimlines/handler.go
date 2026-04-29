@@ -5,15 +5,27 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/tfior/doc-tracker/internal/activitylog"
+	"github.com/tfior/doc-tracker/internal/auth"
 	"github.com/tfior/doc-tracker/platform"
 )
 
 type Handler struct {
-	svc *Service
+	svc    *Service
+	actlog *activitylog.Service
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, actlog *activitylog.Service) *Handler {
+	return &Handler{svc: svc, actlog: actlog}
+}
+
+func (h *Handler) log(r *http.Request, p activitylog.InsertParams) {
+	if h.actlog == nil {
+		return
+	}
+	userID, _ := auth.UserIDFromContext(r.Context())
+	p.UserID = userID
+	_ = h.actlog.Insert(r.Context(), p)
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -79,6 +91,10 @@ func (h *Handler) createClaimLine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log(r, activitylog.InsertParams{
+		CaseID: caseID, Action: "created", EntityType: "claim_line",
+		EntityID: cl.ID, EntityName: cl.Status + " claim line",
+	})
 	platform.JSON(w, http.StatusCreated, cl)
 }
 
@@ -109,6 +125,21 @@ func (h *Handler) updateClaimLine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var changes []activitylog.FieldChange
+	if body.Status != nil {
+		changes = append(changes, activitylog.FieldChange{Field: "status", To: *body.Status})
+	}
+	if body.Notes.Set {
+		var val interface{}
+		if body.Notes.Valid {
+			val = body.Notes.Value
+		}
+		changes = append(changes, activitylog.FieldChange{Field: "notes", To: val})
+	}
+	h.log(r, activitylog.InsertParams{
+		CaseID: caseID, Action: "updated", EntityType: "claim_line",
+		EntityID: cl.ID, EntityName: cl.Status + " claim line", Changes: changes,
+	})
 	platform.JSON(w, http.StatusOK, cl)
 }
 
@@ -126,6 +157,10 @@ func (h *Handler) deleteClaimLine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log(r, activitylog.InsertParams{
+		CaseID: caseID, Action: "deleted", EntityType: "claim_line",
+		EntityID: lineID, EntityName: lineID,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
