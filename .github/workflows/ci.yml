@@ -34,7 +34,7 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: go test ./...
+        run: go test -p 1 ./...
         env:
           DB_HOST: localhost
           DB_PORT: 5432
