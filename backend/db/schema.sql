@@ -17,7 +17,7 @@ CREATE TYPE activity_entity_type AS ENUM (
 
 CREATE TYPE case_status AS ENUM ('active', 'archived', 'complete');
 
-CREATE TYPE claim_line_status AS ENUM ('active', 'suspended', 'eliminated', 'confirmed');
+CREATE TYPE claim_line_status AS ENUM ('not_yet_researched', 'researching', 'paused', 'ineligible', 'eligible');
 
 CREATE TYPE life_event_type AS ENUM ('birth', 'marriage', 'death', 'naturalization', 'immigration', 'other');
 
@@ -46,14 +46,15 @@ CREATE TABLE cases (
     id                     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     title                  TEXT        NOT NULL,
     status                 case_status NOT NULL DEFAULT 'active',
-    primary_root_person_id UUID        REFERENCES people(id),
+    primary_root_person_id UUID        REFERENCES people(id) ON DELETE SET NULL,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at             TIMESTAMPTZ
 );
 
 CREATE TABLE people (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id     UUID        NOT NULL REFERENCES cases(id),
+    case_id     UUID        NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
     first_name  TEXT        NOT NULL,
     last_name   TEXT        NOT NULL,
     birth_date  DATE,
@@ -61,30 +62,32 @@ CREATE TABLE people (
     death_date  DATE,
     notes       TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at  TIMESTAMPTZ
 );
 
 CREATE TABLE person_relationships (
-    person_id UUID NOT NULL REFERENCES people(id),
-    parent_id UUID NOT NULL REFERENCES people(id),
-    case_id   UUID NOT NULL REFERENCES cases(id),
+    person_id UUID NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    parent_id UUID NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    case_id   UUID NOT NULL REFERENCES cases(id)  ON DELETE CASCADE,
     PRIMARY KEY (person_id, parent_id)
 );
 
 CREATE TABLE claim_lines (
     id             UUID              PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id        UUID              NOT NULL REFERENCES cases(id),
-    root_person_id UUID              NOT NULL REFERENCES people(id),
-    status         claim_line_status NOT NULL DEFAULT 'active',
+    case_id        UUID              NOT NULL REFERENCES cases(id)  ON DELETE CASCADE,
+    root_person_id UUID              NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    status         claim_line_status NOT NULL DEFAULT 'not_yet_researched',
     notes          TEXT,
     created_at     TIMESTAMPTZ       NOT NULL DEFAULT NOW(),
-    updated_at     TIMESTAMPTZ       NOT NULL DEFAULT NOW()
+    updated_at     TIMESTAMPTZ       NOT NULL DEFAULT NOW(),
+    deleted_at     TIMESTAMPTZ
 );
 
 CREATE TABLE life_events (
     id                 UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id            UUID            NOT NULL REFERENCES cases(id),
-    person_id          UUID            NOT NULL REFERENCES people(id),
+    case_id            UUID            NOT NULL REFERENCES cases(id)  ON DELETE CASCADE,
+    person_id          UUID            NOT NULL REFERENCES people(id) ON DELETE CASCADE,
     event_type         life_event_type NOT NULL,
     event_date         DATE,
     event_place        TEXT,
@@ -93,7 +96,8 @@ CREATE TABLE life_events (
     spouse_birth_place TEXT,
     notes              TEXT,
     created_at         TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
-    updated_at         TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+    updated_at         TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    deleted_at         TIMESTAMPTZ
 );
 
 CREATE TABLE document_statuses (
@@ -107,9 +111,9 @@ CREATE TABLE document_statuses (
 
 CREATE TABLE documents (
     id                   UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id              UUID          NOT NULL REFERENCES cases(id),
-    person_id            UUID          NOT NULL REFERENCES people(id),
-    life_event_id        UUID          REFERENCES life_events(id),
+    case_id              UUID          NOT NULL REFERENCES cases(id)       ON DELETE CASCADE,
+    person_id            UUID          NOT NULL REFERENCES people(id)      ON DELETE CASCADE,
+    life_event_id        UUID          REFERENCES life_events(id)          ON DELETE SET NULL,
     status_id            UUID          NOT NULL REFERENCES document_statuses(id),
     document_type        document_type NOT NULL,
     title                TEXT          NOT NULL,
@@ -124,12 +128,13 @@ CREATE TABLE documents (
     verified_at          TIMESTAMPTZ,
     notes                TEXT,
     created_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    updated_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    deleted_at           TIMESTAMPTZ
 );
 
 CREATE TABLE file_attachments (
     id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id     UUID            NOT NULL REFERENCES documents(id),
+    document_id     UUID            NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     storage_key     TEXT            NOT NULL,
     filename        TEXT            NOT NULL,
     content_type    TEXT            NOT NULL,
@@ -143,7 +148,7 @@ CREATE TABLE file_attachments (
 
 CREATE TABLE activity_logs (
     id          UUID                 PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id     UUID                 NOT NULL REFERENCES cases(id),
+    case_id     UUID                 NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
     user_id     UUID                 NOT NULL REFERENCES users(id),
     action      activity_action      NOT NULL,
     entity_type activity_entity_type NOT NULL,

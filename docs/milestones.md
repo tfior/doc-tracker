@@ -103,37 +103,49 @@ Authentication and full write operations. After this milestone the app is a func
 - A user can add, edit, and remove documents (metadata only — no file upload yet)
 - A user can manually transition a document's status
 - A user can create and update claim lines
+- Deleted entities go to a trash view; trashed entities are frozen until restored or permanently deleted
+- A user can restore a trashed entity or permanently delete it immediately
+- A user can reassign a LifeEvent to a different Person within the same Case
+- A user can reassign a Document to a different LifeEvent within the same Case (including cross-person)
 - No file upload, no ZIP export
 
 ### Backend
 
-- [ ] Migration for `users` table
-- [ ] Migration for `activity_logs` table
-- [ ] `users` module: User model, store, service; bcrypt password hashing
-- [ ] `auth` module: login, logout, session middleware; authentication against `users` table
-- [ ] Auth middleware applied to all `/api/v1` routes
-- [ ] `POST /api/v1/cases`, `PATCH /api/v1/cases/:caseId`, `DELETE /api/v1/cases/:caseId`
-- [ ] `POST /api/v1/cases/:caseId/people`, `PATCH /api/v1/cases/:caseId/people/:personId`, `DELETE /api/v1/cases/:caseId/people/:personId`
-- [ ] `POST /api/v1/cases/:caseId/people/:personId/relationships`, `DELETE /api/v1/cases/:caseId/people/:personId/relationships/:parentId`
-- [ ] `POST /api/v1/cases/:caseId/life-events`, `PATCH /api/v1/cases/:caseId/life-events/:eventId`, `DELETE /api/v1/cases/:caseId/life-events/:eventId`
-- [ ] `POST /api/v1/cases/:caseId/documents`, `PATCH /api/v1/cases/:caseId/documents/:docId`, `DELETE /api/v1/cases/:caseId/documents/:docId`
+- [x] Migration for `users` table
+- [x] Migration for `activity_logs` table
+- [x] `users` module: User model, store, service; bcrypt password hashing
+- [x] `auth` module: login, logout, session middleware; authentication against `users` table
+- [x] Auth middleware applied to all `/api/v1` routes
+- [ ] Migration adding `deleted_at` to cases, people, life_events, documents, claim_lines; `ON DELETE CASCADE` on all entity FK constraints
+- [ ] `POST /api/v1/cases`, `PATCH /api/v1/cases/:caseId`, `DELETE /api/v1/cases/:caseId` (soft-delete)
+- [ ] `POST /api/v1/cases/:caseId/people`, `PATCH /api/v1/cases/:caseId/people/:personId`, `DELETE /api/v1/cases/:caseId/people/:personId` (soft-delete)
+- [ ] `POST /api/v1/cases/:caseId/people/:personId/relationships`, `DELETE /api/v1/cases/:caseId/people/:personId/relationships/:parentId` (hard-delete)
+- [ ] `POST /api/v1/cases/:caseId/life-events`, `PATCH /api/v1/cases/:caseId/life-events/:eventId`, `DELETE /api/v1/cases/:caseId/life-events/:eventId` (soft-delete)
+- [ ] `PATCH /api/v1/cases/:caseId/life-events/:eventId/person` — reassign LifeEvent to a different Person within the same Case
+- [ ] `POST /api/v1/cases/:caseId/documents`, `PATCH /api/v1/cases/:caseId/documents/:docId`, `DELETE /api/v1/cases/:caseId/documents/:docId` (soft-delete)
 - [ ] `PATCH /api/v1/cases/:caseId/documents/:docId/status` — manual status transition
-- [ ] `POST /api/v1/cases/:caseId/claim-lines`, `PATCH /api/v1/cases/:caseId/claim-lines/:lineId`, `DELETE /api/v1/cases/:caseId/claim-lines/:lineId`
-- [ ] Activity log insertion in all write handlers (create, update, delete)
+- [ ] `PATCH /api/v1/cases/:caseId/documents/:docId/parent` — reassign Document to a different LifeEvent/Person within the same Case
+- [ ] `POST /api/v1/cases/:caseId/claim-lines`, `PATCH /api/v1/cases/:caseId/claim-lines/:lineId`, `DELETE /api/v1/cases/:caseId/claim-lines/:lineId` (soft-delete)
+- [ ] Trash endpoints: list trashed entities, restore, permanent delete
+- [ ] Activity log insertion in all write handlers (create, update, delete, restore, reassign)
 
 ### Frontend
 
-- [ ] Login page and logout action
-- [ ] Auth-aware routing — redirect to login if no active session
+- [x] Login page and logout action
+- [x] Auth-aware routing — redirect to login if no active session
 - [ ] Create and edit case forms
 - [ ] Add, edit, and remove person forms
-- [ ] Parent-child relationship UI
+- [ ] Parent-child relationship UI (Parents field: up to 2; Children field: unlimited; same-case scope)
 - [ ] Add, edit, and remove life event forms
+- [ ] Reassign life event to a different person
 - [ ] Add, edit, and remove document forms
+- [ ] Reassign document to a different life event / person
 - [ ] Document status transition UI
 - [ ] Claim line create and status management UI
+- [ ] Trash view — list trashed entities with restore and permanent delete actions
 
 ### Infrastructure
 
-- [ ] Sessions stored server-side in memory (database-backed sessions deferred)
-- [ ] `make create-user` target — prompts for email, first name, last name, password; inserts a new user record; separate from seed data
+- [x] Sessions stored server-side in memory (database-backed sessions deferred)
+- [x] `make create-user` target — prompts for email, first name, last name, password; inserts a new user record; separate from seed data
+- [x] GitHub Actions CI — runs `go test ./...` against a postgres service on push to main and on all pull requests

@@ -11,3 +11,12 @@ type ClaimLine struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
+
+// NullableField carries the three-state value for optional nullable fields in
+// PATCH requests: absent (Set=false), explicit null (Set=true, Valid=false),
+// or a value (Set=true, Valid=true).
+type NullableField struct {
+	Set   bool
+	Valid bool
+	Value string
+}
