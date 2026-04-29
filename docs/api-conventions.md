@@ -22,6 +22,7 @@ Resources are nested under their owning case. Maximum nesting depth is three lev
 /api/v1/cases/:caseId/documents/:documentId/attachments
 /api/v1/cases/:caseId/documents/:documentId/attachments/:attachmentId
 /api/v1/cases/:caseId/exports
+/api/v1/document-statuses
 /api/v1/auth/session
 ```
 
@@ -30,6 +31,9 @@ Resources are nested under their owning case. Maximum nesting depth is three lev
 - Everything is case-scoped — authorization is checked at the case level and all child resources are implicitly covered
 - `PersonRelationship` is managed through the people endpoints, not a separate route
 - Exports are a sub-resource of cases, not top-level
+- `DocumentStatus` entries are workspace-global and not nested under a case
+- `GET /api/v1/document-statuses` accepts an optional `?phase=` query parameter to filter by phase (`official_copy`, `amendment`, `apostille`, `translation`, `any`). Omitting it returns all statuses.
+- `PATCH /api/v1/cases/:caseId/documents/:documentId/status` accepts `{"phase": "official_copy", "status_id": "uuid"}` to transition a single phase. The `phase` field must be one of `official_copy`, `amendment`, `apostille`, `translation`.
 
 ## HTTP Methods
 

@@ -45,7 +45,7 @@ IMPORTANT: Only update these files (including this CLAUDE.md file) after permiss
 - This app tracks documents for citizenship-by-descent and genealogy-related cases
 - Primary users are professionals collecting documents on behalf of applicants
 - `recorded_*` fields on Document always reflect the original document in its original language — never populated from translations or apostilles
-- `is_verified` on Document flips to false when an amendment is uploaded; stays true for apostille and translation uploads
+- `is_verified` on Document is a manual boolean checkbox — no system action modifies it automatically
 - Spouse data lives on the marriage LifeEvent as flat fields — spouses are not Person records in the lineage graph
 - PersonRelationship is parent-child only — no other relationship types
 - ClaimLine is always present, even for single-LIRA cases (status: eligible)

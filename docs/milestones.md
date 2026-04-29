@@ -116,18 +116,21 @@ Authentication and full write operations. After this milestone the app is a func
 - [x] `users` module: User model, store, service; bcrypt password hashing
 - [x] `auth` module: login, logout, session middleware; authentication against `users` table
 - [x] Auth middleware applied to all `/api/v1` routes
-- [ ] Migration adding `deleted_at` to cases, people, life_events, documents, claim_lines; `ON DELETE CASCADE` on all entity FK constraints
-- [ ] `POST /api/v1/cases`, `PATCH /api/v1/cases/:caseId`, `DELETE /api/v1/cases/:caseId` (soft-delete)
-- [ ] `POST /api/v1/cases/:caseId/people`, `PATCH /api/v1/cases/:caseId/people/:personId`, `DELETE /api/v1/cases/:caseId/people/:personId` (soft-delete)
-- [ ] `POST /api/v1/cases/:caseId/people/:personId/relationships`, `DELETE /api/v1/cases/:caseId/people/:personId/relationships/:parentId` (hard-delete)
-- [ ] `POST /api/v1/cases/:caseId/life-events`, `PATCH /api/v1/cases/:caseId/life-events/:eventId`, `DELETE /api/v1/cases/:caseId/life-events/:eventId` (soft-delete)
-- [ ] `PATCH /api/v1/cases/:caseId/life-events/:eventId/person` — reassign LifeEvent to a different Person within the same Case
-- [ ] `POST /api/v1/cases/:caseId/documents`, `PATCH /api/v1/cases/:caseId/documents/:docId`, `DELETE /api/v1/cases/:caseId/documents/:docId` (soft-delete)
-- [ ] `PATCH /api/v1/cases/:caseId/documents/:docId/status` — manual status transition
-- [ ] `PATCH /api/v1/cases/:caseId/documents/:docId/parent` — reassign Document to a different LifeEvent/Person within the same Case
-- [ ] `POST /api/v1/cases/:caseId/claim-lines`, `PATCH /api/v1/cases/:caseId/claim-lines/:lineId`, `DELETE /api/v1/cases/:caseId/claim-lines/:lineId` (soft-delete)
-- [ ] Trash endpoints: list trashed entities, restore, permanent delete
-- [ ] Activity log insertion in all write handlers (create, update, delete, restore, reassign)
+- [x] Migration adding `deleted_at` to cases, people, life_events, documents, claim_lines; `ON DELETE CASCADE` on all entity FK constraints
+- [x] `POST /api/v1/cases`, `PATCH /api/v1/cases/:caseId`, `DELETE /api/v1/cases/:caseId` (soft-delete)
+- [x] `POST /api/v1/cases/:caseId/people`, `PATCH /api/v1/cases/:caseId/people/:personId`, `DELETE /api/v1/cases/:caseId/people/:personId` (soft-delete)
+- [x] `POST /api/v1/cases/:caseId/people/:personId/relationships`, `DELETE /api/v1/cases/:caseId/people/:personId/relationships/:parentId` (hard-delete)
+- [x] `POST /api/v1/cases/:caseId/life-events`, `PATCH /api/v1/cases/:caseId/life-events/:eventId`, `DELETE /api/v1/cases/:caseId/life-events/:eventId` (soft-delete)
+- [x] `PATCH /api/v1/cases/:caseId/life-events/:eventId/person` — reassign LifeEvent to a different Person within the same Case
+- [x] `POST /api/v1/cases/:caseId/documents`, `PATCH /api/v1/cases/:caseId/documents/:docId`, `DELETE /api/v1/cases/:caseId/documents/:docId` (soft-delete)
+- [x] `PATCH /api/v1/cases/:caseId/documents/:docId/parent` — reassign Document to a different LifeEvent/Person within the same Case
+- [x] `POST /api/v1/cases/:caseId/claim-lines`, `PATCH /api/v1/cases/:caseId/claim-lines/:lineId`, `DELETE /api/v1/cases/:caseId/claim-lines/:lineId` (soft-delete)
+- [x] Trash endpoints: list trashed entities, restore, permanent delete
+- [x] Activity log insertion in all write handlers (create, update, delete, restore, reassign)
+- [ ] Migration: replace `status_id` on documents with four phase status columns (`official_copy_status_id`, `amendment_status_id`, `apostille_status_id`, `translation_status_id`); add `phase` column to `document_statuses`; reseed with new system statuses
+- [ ] Update Document model, store, and service for four-phase status fields
+- [ ] `GET /api/v1/document-statuses` — list all document statuses, filterable by `?phase=`
+- [ ] `PATCH /api/v1/cases/:caseId/documents/:docId/status` — revised to accept `{phase, status_id}` for per-phase transitions
 
 ### Frontend
 
