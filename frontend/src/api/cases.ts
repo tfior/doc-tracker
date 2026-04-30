@@ -1,4 +1,4 @@
-import { get, type ListResponse } from './client';
+import { get, post, patch, del } from './client';
 
 export interface Case {
   id: string;
@@ -11,21 +11,22 @@ export interface Case {
 
 export interface ClaimLineSummary {
   total: number;
-  active: number;
-  suspended: number;
-  eliminated: number;
-  confirmed: number;
-}
-
-export interface DocumentProgress {
-  not_started: number;
-  in_progress: number;
-  complete: number;
+  not_yet_researched: number;
+  researching: number;
+  paused: number;
+  ineligible: number;
+  eligible: number;
 }
 
 export interface CaseDetail extends Case {
   claim_line_summary: ClaimLineSummary;
-  document_progress: DocumentProgress;
+}
+
+export interface ListResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  per_page: number;
 }
 
 export function listCases(): Promise<ListResponse<Case>> {
@@ -34,4 +35,16 @@ export function listCases(): Promise<ListResponse<Case>> {
 
 export function getCase(caseId: string): Promise<CaseDetail> {
   return get<CaseDetail>(`/cases/${caseId}`);
+}
+
+export function createCase(title: string): Promise<Case> {
+  return post<Case>('/cases', { title });
+}
+
+export function updateCase(caseId: string, input: { title?: string; status?: string }): Promise<Case> {
+  return patch<Case>(`/cases/${caseId}`, input);
+}
+
+export function deleteCase(caseId: string): Promise<void> {
+  return del(`/cases/${caseId}`);
 }
