@@ -127,10 +127,10 @@ Authentication and full write operations. After this milestone the app is a func
 - [x] `POST /api/v1/cases/:caseId/claim-lines`, `PATCH /api/v1/cases/:caseId/claim-lines/:lineId`, `DELETE /api/v1/cases/:caseId/claim-lines/:lineId` (soft-delete)
 - [x] Trash endpoints: list trashed entities, restore, permanent delete
 - [x] Activity log insertion in all write handlers (create, update, delete, restore, reassign)
-- [ ] Migration: replace `status_id` on documents with four phase status columns (`official_copy_status_id`, `amendment_status_id`, `apostille_status_id`, `translation_status_id`); add `phase` column to `document_statuses`; reseed with new system statuses
-- [ ] Update Document model, store, and service for four-phase status fields
-- [ ] `GET /api/v1/document-statuses` — list all document statuses, filterable by `?phase=`
-- [ ] `PATCH /api/v1/cases/:caseId/documents/:docId/status` — revised to accept `{phase, status_id}` for per-phase transitions
+- [x] Migration: replace `status_id` on documents with four phase status columns (`official_copy_status_id`, `amendment_status_id`, `apostille_status_id`, `translation_status_id`); add `phase` column to `document_statuses`; reseed with new system statuses
+- [x] Update Document model, store, and service for four-phase status fields
+- [x] `GET /api/v1/document-statuses` — list all document statuses, filterable by `?phase=`
+- [x] `PATCH /api/v1/cases/:caseId/documents/:docId/status` — revised to accept `{phase, status_id}` for per-phase transitions
 
 ### Frontend
 

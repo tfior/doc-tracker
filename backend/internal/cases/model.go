@@ -20,14 +20,7 @@ type ClaimLineSummary struct {
 	Eligible         int `json:"eligible"`
 }
 
-type DocumentProgress struct {
-	NotStarted int `json:"not_started"`
-	InProgress int `json:"in_progress"`
-	Complete   int `json:"complete"`
-}
-
 type CaseDetail struct {
 	Case
 	ClaimLineSummary ClaimLineSummary `json:"claim_line_summary"`
-	DocumentProgress DocumentProgress `json:"document_progress"`
 }

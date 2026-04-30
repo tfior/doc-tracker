@@ -34,12 +34,28 @@ func (h *Handler) log(r *http.Request, p activitylog.InsertParams) {
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/document-statuses", h.listDocumentStatuses)
 	mux.HandleFunc("GET /api/v1/cases/{caseId}/documents", h.listDocuments)
 	mux.HandleFunc("POST /api/v1/cases/{caseId}/documents", h.createDocument)
 	mux.HandleFunc("PATCH /api/v1/cases/{caseId}/documents/{docId}", h.updateDocument)
 	mux.HandleFunc("DELETE /api/v1/cases/{caseId}/documents/{docId}", h.deleteDocument)
 	mux.HandleFunc("PATCH /api/v1/cases/{caseId}/documents/{docId}/status", h.transitionStatus)
 	mux.HandleFunc("PATCH /api/v1/cases/{caseId}/documents/{docId}/parent", h.reassignDocument)
+}
+
+func (h *Handler) listDocumentStatuses(w http.ResponseWriter, r *http.Request) {
+	phase := r.URL.Query().Get("phase")
+	if phase != "" && !validPhases[phase] {
+		platform.Error(w, http.StatusBadRequest, "invalid_input", "phase must be one of: official_copy, amendment, apostille, translation")
+		return
+	}
+
+	statuses, err := h.svc.ListDocumentStatuses(r.Context(), phase)
+	if err != nil {
+		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		return
+	}
+	platform.JSON(w, http.StatusOK, statuses)
 }
 
 func (h *Handler) listDocuments(w http.ResponseWriter, r *http.Request) {
@@ -245,20 +261,32 @@ func (h *Handler) transitionStatus(w http.ResponseWriter, r *http.Request) {
 	docID := r.PathValue("docId")
 
 	var body struct {
-		StatusKey string `json:"status_key"`
+		Phase    string `json:"phase"`
+		StatusID string `json:"status_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
 		return
 	}
-	if !validStatusKeys[body.StatusKey] {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "status_key must be one of: pending, collected, verified, unobtainable")
+	if !validPhases[body.Phase] {
+		platform.Error(w, http.StatusBadRequest, "invalid_input", "phase must be one of: official_copy, amendment, apostille, translation")
+		return
+	}
+	if body.StatusID == "" {
+		platform.Error(w, http.StatusBadRequest, "invalid_input", "status_id is required")
 		return
 	}
 
-	d, err := h.svc.TransitionStatus(r.Context(), caseID, docID, body.StatusKey)
+	d, err := h.svc.TransitionStatus(r.Context(), caseID, docID, TransitionStatusInput{
+		Phase:    body.Phase,
+		StatusID: body.StatusID,
+	})
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Document not found")
+		return
+	}
+	if errors.Is(err, ErrInvalidStatus) {
+		platform.Error(w, http.StatusBadRequest, "invalid_input", "status does not belong to the requested phase")
 		return
 	}
 	if err != nil {
@@ -269,7 +297,7 @@ func (h *Handler) transitionStatus(w http.ResponseWriter, r *http.Request) {
 	h.log(r, activitylog.InsertParams{
 		CaseID: caseID, Action: "updated", EntityType: "document",
 		EntityID: d.ID, EntityName: d.Title,
-		Changes: []activitylog.FieldChange{{Field: "status", To: body.StatusKey}},
+		Changes: []activitylog.FieldChange{{Field: body.Phase + "_status", To: body.StatusID}},
 	})
 	platform.JSON(w, http.StatusOK, d)
 }

@@ -65,10 +65,10 @@ func seed(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	// Look up system document status IDs.
-	rows, err := tx.Query(`SELECT system_key::text, id::text FROM document_statuses WHERE is_system = true`)
+	// Look up document status IDs needed for seed data.
+	rows, err := tx.Query(`SELECT system_key, id::text FROM document_statuses WHERE system_key IS NOT NULL AND is_system = true`)
 	if err != nil {
-		return fmt.Errorf("query statuses: %w", err)
+		return fmt.Errorf("query phase default statuses: %w", err)
 	}
 	statusIDs := map[string]string{}
 	for rows.Next() {
@@ -84,9 +84,31 @@ func seed(db *sql.DB) error {
 		return err
 	}
 
-	pending := statusIDs["pending"]
-	collected := statusIDs["collected"]
-	verified := statusIDs["verified"]
+	// Look up any-phase statuses by label.
+	anyRows, err := tx.Query(`SELECT label, id::text FROM document_statuses WHERE phase = 'any' AND is_system = true`)
+	if err != nil {
+		return fmt.Errorf("query any-phase statuses: %w", err)
+	}
+	anyStatusIDs := map[string]string{}
+	for anyRows.Next() {
+		var label, id string
+		if err := anyRows.Scan(&label, &id); err != nil {
+			anyRows.Close()
+			return err
+		}
+		anyStatusIDs[label] = id
+	}
+	anyRows.Close()
+	if err := anyRows.Err(); err != nil {
+		return err
+	}
+
+	ocDefault := statusIDs["official_copy_default"]
+	amDefault := statusIDs["amendment_default"]
+	apDefault := statusIDs["apostille_default"]
+	trDefault := statusIDs["translation_default"]
+	complete := anyStatusIDs["Complete"]
+	notRequired := anyStatusIDs["Not Required"]
 
 	s := &seeder{tx: tx}
 
@@ -198,128 +220,151 @@ func seed(db *sql.DB) error {
 	// Documents
 	// -------------------------------------------------------------------------
 
-	// Giuseppe — Italian birth certificate (verified)
+	// Giuseppe — Italian birth certificate (fully processed: official copy + apostille + translation complete)
 	giuseppeBirthCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title,
-			 issuing_authority, issue_date,
-			 recorded_given_name, recorded_surname,
-			 is_verified, verified_at)
-		VALUES ($1, $2, $3, $4, 'birth_certificate', 'Italian Birth Certificate',
-			'Comune di Palermo, Italy', $5,
-			'Giuseppe', 'Rossi',
-			true, '2024-06-01 00:00:00+00')
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, issuing_authority, issue_date,
+			 recorded_given_name, recorded_surname, is_verified, verified_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7,
+			'birth_certificate', 'Italian Birth Certificate', 'Comune di Palermo, Italy', $8,
+			'Giuseppe', 'Rossi', true, '2024-06-01 00:00:00+00')
 		RETURNING id::text`,
-		caseID, giuseppeID, giuseppeBirthID, verified, "1875-03-15")
+		caseID, giuseppeID, giuseppeBirthID,
+		complete, notRequired, complete, complete, "1875-03-15")
 
-	// Giuseppe — Marriage certificate (verified)
+	// Giuseppe — Marriage certificate (fully processed)
 	giuseppeMarriageCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title,
-			 is_verified, verified_at)
-		VALUES ($1, $2, $3, $4, 'marriage_certificate', 'Marriage Certificate',
-			true, '2024-06-01 00:00:00+00')
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, is_verified, verified_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7,
+			'marriage_certificate', 'Marriage Certificate', true, '2024-06-01 00:00:00+00')
 		RETURNING id::text`,
-		caseID, giuseppeID, giuseppeMarriageID, verified)
+		caseID, giuseppeID, giuseppeMarriageID,
+		complete, notRequired, complete, complete)
 
-	// Giuseppe — US naturalization certificate (collected, unverified)
-	// Amendment uploaded — is_verified stays false per domain rule.
+	// Giuseppe — US naturalization certificate (official copy received; amendment complete; apostille/translation not yet started)
 	// life_event_id is NULL; no naturalization LifeEvent in this case's seed data.
 	giuseppeNatCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, status_id, document_type, title,
-			 issuing_authority, issue_date,
-			 is_verified, notes)
-		VALUES ($1, $2, $3, 'naturalization', 'US Naturalization Certificate',
-			'U.S. District Court, S.D.N.Y.', $4,
-			false,
+			(case_id, person_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, issuing_authority, issue_date, is_verified, notes)
+		VALUES ($1, $2, $3, $4, $5, $6,
+			'naturalization', 'US Naturalization Certificate',
+			'U.S. District Court, S.D.N.Y.', $7, false,
 			'Date of naturalization must post-date Antonio''s birth (22 Sep 1905) to preserve citizenship transmission. Amendment added middle initial "L." to recorded name.')
 		RETURNING id::text`,
-		caseID, giuseppeID, collected, "1915-07-04")
+		caseID, giuseppeID,
+		complete, complete, apDefault, trDefault, "1915-07-04")
 
-	// Giuseppe — Death certificate (pending)
+	// Giuseppe — Death certificate (not yet started)
 	s.exec(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title, is_verified)
-		VALUES ($1, $2, $3, $4, 'death_certificate', 'Death Certificate', false)`,
-		caseID, giuseppeID, giuseppeDeathID, pending)
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, is_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'death_certificate', 'Death Certificate', false)`,
+		caseID, giuseppeID, giuseppeDeathID,
+		ocDefault, amDefault, apDefault, trDefault)
 
-	// Antonio — US birth certificate (verified)
+	// Antonio — US birth certificate (fully processed)
 	antonioBirthCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title,
-			 issuing_authority, issue_date,
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, issuing_authority, issue_date,
 			 is_verified, verified_at, notes)
-		VALUES ($1, $2, $3, $4, 'birth_certificate', 'US Birth Certificate',
-			'NYC Department of Health', $5,
+		VALUES ($1, $2, $3, $4, $5, $6, $7,
+			'birth_certificate', 'US Birth Certificate', 'NYC Department of Health', $8,
 			true, '2024-06-01 00:00:00+00',
 			'Proves birth on 22 Sep 1905, prior to Giuseppe''s naturalization on 4 Jul 1915.')
 		RETURNING id::text`,
-		caseID, antonioID, antonioBirthID, verified, "1905-09-22")
+		caseID, antonioID, antonioBirthID,
+		complete, notRequired, complete, notRequired, "1905-09-22")
 
-	// Antonio — Marriage certificate (verified)
+	// Antonio — Marriage certificate (fully processed)
 	antonioMarriageCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title,
-			 is_verified, verified_at)
-		VALUES ($1, $2, $3, $4, 'marriage_certificate', 'Marriage Certificate',
-			true, '2024-06-01 00:00:00+00')
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, is_verified, verified_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7,
+			'marriage_certificate', 'Marriage Certificate', true, '2024-06-01 00:00:00+00')
 		RETURNING id::text`,
-		caseID, antonioID, antonioMarriageID, verified)
+		caseID, antonioID, antonioMarriageID,
+		complete, notRequired, complete, notRequired)
 
-	// Antonio — Death certificate (collected, unverified)
+	// Antonio — Death certificate (official copy received; further phases not started)
 	antonioDeathCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title, is_verified)
-		VALUES ($1, $2, $3, $4, 'death_certificate', 'Death Certificate', false)
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, is_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'death_certificate', 'Death Certificate', false)
 		RETURNING id::text`,
-		caseID, antonioID, antonioDeathID, collected)
+		caseID, antonioID, antonioDeathID,
+		complete, amDefault, apDefault, trDefault)
 
-	// Carlo — US birth certificate (verified)
+	// Carlo — US birth certificate (fully processed)
 	carloBirthCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title,
-			 issuing_authority, issue_date,
-			 is_verified, verified_at)
-		VALUES ($1, $2, $3, $4, 'birth_certificate', 'US Birth Certificate',
-			'NYC Department of Health', $5,
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, issuing_authority, issue_date, is_verified, verified_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7,
+			'birth_certificate', 'US Birth Certificate', 'NYC Department of Health', $8,
 			true, '2024-06-01 00:00:00+00')
 		RETURNING id::text`,
-		caseID, carloID, carloBirthID, verified, "1932-08-11")
+		caseID, carloID, carloBirthID,
+		complete, notRequired, complete, notRequired, "1932-08-11")
 
-	// Carlo — Marriage certificate (collected, unverified)
+	// Carlo — Marriage certificate (official copy received; further phases not started)
 	carloMarriageCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title, is_verified)
-		VALUES ($1, $2, $3, $4, 'marriage_certificate', 'Marriage Certificate', false)
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, is_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'marriage_certificate', 'Marriage Certificate', false)
 		RETURNING id::text`,
-		caseID, carloID, carloMarriageID, collected)
+		caseID, carloID, carloMarriageID,
+		complete, amDefault, apDefault, trDefault)
 
-	// Carlo — Death certificate (pending)
+	// Carlo — Death certificate (not yet started)
 	s.exec(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title, is_verified)
-		VALUES ($1, $2, $3, $4, 'death_certificate', 'Death Certificate', false)`,
-		caseID, carloID, carloDeathID, pending)
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, is_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'death_certificate', 'Death Certificate', false)`,
+		caseID, carloID, carloDeathID,
+		ocDefault, amDefault, apDefault, trDefault)
 
-	// Sofia — US birth certificate (verified)
+	// Sofia — US birth certificate (fully processed)
 	sofiaBirthCertID := s.id(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title,
-			 issuing_authority, issue_date,
-			 is_verified, verified_at)
-		VALUES ($1, $2, $3, $4, 'birth_certificate', 'US Birth Certificate',
-			'NYC Department of Health', $5,
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, issuing_authority, issue_date, is_verified, verified_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7,
+			'birth_certificate', 'US Birth Certificate', 'NYC Department of Health', $8,
 			true, '2024-06-01 00:00:00+00')
 		RETURNING id::text`,
-		caseID, sofiaID, sofiaBirthID, verified, "1962-03-08")
+		caseID, sofiaID, sofiaBirthID,
+		complete, notRequired, complete, notRequired, "1962-03-08")
 
-	// Sofia — Marriage certificate (pending, no attachments)
+	// Sofia — Marriage certificate (not yet started, no attachments)
 	s.exec(`
 		INSERT INTO documents
-			(case_id, person_id, life_event_id, status_id, document_type, title, is_verified)
-		VALUES ($1, $2, $3, $4, 'marriage_certificate', 'Marriage Certificate', false)`,
-		caseID, sofiaID, sofiaMarriageID, pending)
+			(case_id, person_id, life_event_id,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
+			 document_type, title, is_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'marriage_certificate', 'Marriage Certificate', false)`,
+		caseID, sofiaID, sofiaMarriageID,
+		ocDefault, amDefault, apDefault, trDefault)
 
 	// -------------------------------------------------------------------------
 	// FileAttachments
