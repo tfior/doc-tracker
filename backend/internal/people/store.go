@@ -51,7 +51,8 @@ func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int
 			first_name, last_name,
 			birth_date::text, birth_place,
 			death_date::text, notes,
-			created_at, updated_at
+			created_at, updated_at,
+			ARRAY(SELECT parent_id::text FROM person_relationships WHERE person_id = people.id ORDER BY parent_id) AS parent_ids
 		FROM people
 		WHERE case_id = $1 AND deleted_at IS NULL
 		ORDER BY birth_date ASC NULLS LAST
@@ -66,16 +67,19 @@ func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int
 	for rows.Next() {
 		var p Person
 		var birthDate, birthPlace, deathDate, notes sql.NullString
+		var parentIDs pq.StringArray
 		if err := rows.Scan(
 			&p.ID, &p.CaseID,
 			&p.FirstName, &p.LastName,
 			&birthDate, &birthPlace,
 			&deathDate, &notes,
 			&p.CreatedAt, &p.UpdatedAt,
+			&parentIDs,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan person: %w", err)
 		}
 		assignNullable(&p, birthDate, birthPlace, deathDate, notes)
+		p.ParentIDs = toStringSlice(parentIDs)
 		items = append(items, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -86,45 +90,28 @@ func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int
 }
 
 func (s *store) CreatePerson(ctx context.Context, caseID, firstName, lastName string, input UpdatePersonInput) (*Person, error) {
-	var p Person
-	var birthDate, birthPlace, deathDate, notes sql.NullString
-
+	var id string
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO people (case_id, first_name, last_name, birth_date, birth_place, death_date, notes)
 		VALUES ($1, $2, $3, $4::date, $5, $6::date, $7)
-		RETURNING
-			id::text, case_id::text,
-			first_name, last_name,
-			birth_date::text, birth_place,
-			death_date::text, notes,
-			created_at, updated_at`,
+		RETURNING id::text`,
 		caseID, firstName, lastName,
 		nullableToSQL(input.BirthDate),
 		nullableToSQL(input.BirthPlace),
 		nullableToSQL(input.DeathDate),
 		nullableToSQL(input.Notes),
-	).Scan(
-		&p.ID, &p.CaseID,
-		&p.FirstName, &p.LastName,
-		&birthDate, &birthPlace,
-		&deathDate, &notes,
-		&p.CreatedAt, &p.UpdatedAt,
-	)
+	).Scan(&id)
 	if err != nil {
 		if isPGError(err, pgFKViolation) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("insert person: %w", err)
 	}
-	assignNullable(&p, birthDate, birthPlace, deathDate, notes)
-	return &p, nil
+	return s.getPerson(ctx, caseID, id)
 }
 
 func (s *store) UpdatePerson(ctx context.Context, caseID, personID string, input UpdatePersonInput) (*Person, error) {
-	var p Person
-	var birthDate, birthPlace, deathDate, notes sql.NullString
-
-	err := s.db.QueryRowContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 		UPDATE people SET
 			first_name  = COALESCE($3, first_name),
 			last_name   = COALESCE($4, last_name),
@@ -133,13 +120,7 @@ func (s *store) UpdatePerson(ctx context.Context, caseID, personID string, input
 			death_date  = CASE WHEN $9 THEN $10::date  ELSE death_date  END,
 			notes       = CASE WHEN $11 THEN $12        ELSE notes       END,
 			updated_at  = NOW()
-		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL
-		RETURNING
-			id::text, case_id::text,
-			first_name, last_name,
-			birth_date::text, birth_place,
-			death_date::text, notes,
-			created_at, updated_at`,
+		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		personID, caseID,
 		input.FirstName,
 		input.LastName,
@@ -147,20 +128,52 @@ func (s *store) UpdatePerson(ctx context.Context, caseID, personID string, input
 		input.BirthPlace.Set, nullableToSQL(input.BirthPlace),
 		input.DeathDate.Set, nullableToSQL(input.DeathDate),
 		input.Notes.Set, nullableToSQL(input.Notes),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update person: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return nil, ErrNotFound
+	}
+	return s.getPerson(ctx, caseID, personID)
+}
+
+func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person, error) {
+	var p Person
+	var birthDate, birthPlace, deathDate, notes sql.NullString
+	var parentIDs pq.StringArray
+
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			id::text, case_id::text,
+			first_name, last_name,
+			birth_date::text, birth_place,
+			death_date::text, notes,
+			created_at, updated_at,
+			ARRAY(SELECT parent_id::text FROM person_relationships WHERE person_id = people.id ORDER BY parent_id) AS parent_ids
+		FROM people
+		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
+		personID, caseID,
 	).Scan(
 		&p.ID, &p.CaseID,
 		&p.FirstName, &p.LastName,
 		&birthDate, &birthPlace,
 		&deathDate, &notes,
 		&p.CreatedAt, &p.UpdatedAt,
+		&parentIDs,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("update person: %w", err)
+		return nil, fmt.Errorf("get person: %w", err)
 	}
 	assignNullable(&p, birthDate, birthPlace, deathDate, notes)
+	p.ParentIDs = toStringSlice(parentIDs)
 	return &p, nil
 }
 
@@ -256,6 +269,13 @@ func assignNullable(p *Person, birthDate, birthPlace, deathDate, notes sql.NullS
 	if notes.Valid {
 		p.Notes = &notes.String
 	}
+}
+
+func toStringSlice(a pq.StringArray) []string {
+	if a == nil {
+		return []string{}
+	}
+	return []string(a)
 }
 
 func nullableToSQL(f NullableField) sql.NullString {

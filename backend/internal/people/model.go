@@ -11,6 +11,7 @@ type Person struct {
 	BirthPlace *string   `json:"birth_place"`
 	DeathDate  *string   `json:"death_date"`
 	Notes      *string   `json:"notes"`
+	ParentIDs  []string  `json:"parent_ids"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }

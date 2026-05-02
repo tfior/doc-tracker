@@ -501,3 +501,83 @@ func TestListPeople_ExcludesDeleted(t *testing.T) {
 	assert.Len(t, got.Items, 1)
 	assert.Equal(t, "Giuseppe", got.Items[0].FirstName)
 }
+
+// ---------------------------------------------------------------------------
+// parent_ids field
+// ---------------------------------------------------------------------------
+
+func TestParentIDs_NewPersonHasEmptySlice(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+	p := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
+
+	assert.NotNil(t, p.ParentIDs)
+	assert.Empty(t, p.ParentIDs)
+}
+
+func TestParentIDs_ReflectedInList(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
+	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
+
+	addRec := env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships", map[string]any{
+		"parent_id": parent.ID,
+	})
+	require.Equal(t, http.StatusCreated, addRec.Code)
+
+	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/people", nil)
+	var list struct {
+		Items []people.Person `json:"items"`
+	}
+	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&list))
+
+	for _, p := range list.Items {
+		if p.ID == child.ID {
+			assert.Contains(t, p.ParentIDs, parent.ID)
+		}
+		if p.ID == parent.ID {
+			assert.Empty(t, p.ParentIDs)
+		}
+	}
+}
+
+func TestParentIDs_ClearedAfterRemoval(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
+	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
+
+	env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships", map[string]any{
+		"parent_id": parent.ID,
+	})
+	env.do("DELETE", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships/"+parent.ID, nil)
+
+	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/people", nil)
+	var list struct {
+		Items []people.Person `json:"items"`
+	}
+	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&list))
+
+	for _, p := range list.Items {
+		if p.ID == child.ID {
+			assert.Empty(t, p.ParentIDs)
+		}
+	}
+}
+
+func TestParentIDs_PresentOnCreateAndUpdateResponse(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+
+	p := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
+	assert.NotNil(t, p.ParentIDs)
+
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/people/"+p.ID, map[string]any{
+		"first_name": "Giuseppe",
+	})
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var updated people.Person
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&updated))
+	assert.NotNil(t, updated.ParentIDs)
+}

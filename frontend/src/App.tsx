@@ -15,6 +15,9 @@ function CaseNav() {
       <Anchor component={Link} to={`/cases/${caseId}`} size="sm">Overview</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/people`} size="sm">People</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/documents`} size="sm">Documents</Anchor>
+      <Anchor component={Link} to={`/cases/${caseId}/life-events`} size="sm">Life Events</Anchor>
+      <Anchor component={Link} to={`/cases/${caseId}/claim-lines`} size="sm">Claim Lines</Anchor>
+      <Anchor component={Link} to={`/cases/${caseId}/trash`} size="sm">Trash</Anchor>
     </Group>
   );
 }
