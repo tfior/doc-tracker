@@ -7,6 +7,7 @@ import CaseListPage from './features/cases/CaseListPage';
 import CaseOverviewPage from './features/cases/CaseOverviewPage';
 import PeoplePage from './features/people/PeoplePage';
 import DocumentsPage from './features/documents/DocumentsPage';
+import LifeEventsPage from './features/life-events/LifeEventsPage';
 
 function CaseNav() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -14,8 +15,8 @@ function CaseNav() {
     <Group gap="xs" mb="md">
       <Anchor component={Link} to={`/cases/${caseId}`} size="sm">Overview</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/people`} size="sm">People</Anchor>
-      <Anchor component={Link} to={`/cases/${caseId}/documents`} size="sm">Documents</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/life-events`} size="sm">Life Events</Anchor>
+      <Anchor component={Link} to={`/cases/${caseId}/documents`} size="sm">Documents</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/claim-lines`} size="sm">Claim Lines</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/trash`} size="sm">Trash</Anchor>
     </Group>
@@ -79,6 +80,10 @@ export default function App() {
             <Route
               path="/cases/:caseId/people"
               element={<><CaseNav /><PeoplePage /></>}
+            />
+            <Route
+              path="/cases/:caseId/life-events"
+              element={<><CaseNav /><LifeEventsPage /></>}
             />
             <Route
               path="/cases/:caseId/documents"
