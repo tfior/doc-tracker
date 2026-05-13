@@ -44,6 +44,17 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function patch<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(BASE + path, {
+    method: 'PATCH',
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw await parseError(res);
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
 async function del(path: string): Promise<void> {
   const res = await fetch(BASE + path, { method: 'DELETE' });
   if (!res.ok) throw await parseError(res);
@@ -56,4 +67,4 @@ export interface ListResponse<T> {
   per_page: number;
 }
 
-export { get, post, del };
+export { get, post, patch, del };

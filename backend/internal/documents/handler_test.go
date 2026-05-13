@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"database/sql"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tfior/doc-tracker/internal/cases"
@@ -18,6 +20,7 @@ import (
 )
 
 type testEnv struct {
+	db        *sql.DB
 	svc       *documents.Service
 	casesSvc  *cases.Service
 	peopleSvc *people.Service
@@ -38,7 +41,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	mux := http.NewServeMux()
 	documents.NewHandler(docSvc, nil).RegisterRoutes(mux)
 
-	return &testEnv{svc: docSvc, casesSvc: casesSvc, peopleSvc: peopleSvc, leSvc: leSvc, mux: mux}
+	return &testEnv{db: db, svc: docSvc, casesSvc: casesSvc, peopleSvc: peopleSvc, leSvc: leSvc, mux: mux}
 }
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
@@ -128,9 +131,15 @@ func TestCreateDocument_Valid(t *testing.T) {
 	assert.False(t, got.IsVerified)
 	assert.Nil(t, got.VerifiedAt)
 	assert.Nil(t, got.LifeEventID)
-	// Status must default to the system "pending" status.
-	assert.Equal(t, "pending", *got.StatusKey)
-	assert.Equal(t, "not_started", got.ProgressBucket)
+	// Phase status defaults.
+	assert.Equal(t, "Not Started", got.OfficialCopyStatus.Label)
+	assert.NotEmpty(t, got.OfficialCopyStatus.ID)
+	assert.Equal(t, "Unknown", got.AmendmentStatus.Label)
+	assert.NotEmpty(t, got.AmendmentStatus.ID)
+	assert.Equal(t, "Not Started", got.ApostilleStatus.Label)
+	assert.NotEmpty(t, got.ApostilleStatus.ID)
+	assert.Equal(t, "Not Started", got.TranslationStatus.Label)
+	assert.NotEmpty(t, got.TranslationStatus.ID)
 }
 
 func TestCreateDocument_WithOptionalFields(t *testing.T) {
@@ -465,48 +474,96 @@ func TestDeleteDocument_WrongCase(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// PATCH /api/v1/cases/:caseId/documents/:docId/status
+// GET /api/v1/document-statuses
 // ---------------------------------------------------------------------------
 
-func TestTransitionStatus_Valid(t *testing.T) {
+func TestListDocumentStatuses_NoFilter(t *testing.T) {
 	env := newTestEnv(t)
-	c := env.createCase(t)
-	p := env.createPerson(t, c.ID)
-	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
-
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"status_key": "collected",
-	})
-
+	rec := env.do("GET", "/api/v1/document-statuses", nil)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	var got documents.Document
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
-	require.NotNil(t, got.StatusKey)
-	assert.Equal(t, "collected", *got.StatusKey)
-	assert.Equal(t, "in_progress", got.ProgressBucket)
 }
 
-func TestTransitionStatus_InvalidKey(t *testing.T) {
+func TestListDocumentStatuses_ValidPhaseFilters(t *testing.T) {
 	env := newTestEnv(t)
-	c := env.createCase(t)
-	p := env.createPerson(t, c.ID)
-	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
+	for _, phase := range []string{"official_copy", "amendment", "apostille", "translation"} {
+		rec := env.do("GET", "/api/v1/document-statuses?phase="+phase, nil)
+		assert.Equal(t, http.StatusOK, rec.Code, "expected 200 for phase=%s", phase)
+	}
+}
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"status_key": "approved",
-	})
-
+func TestListDocumentStatuses_InvalidPhase(t *testing.T) {
+	env := newTestEnv(t)
+	rec := env.do("GET", "/api/v1/document-statuses?phase=signature", nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestTransitionStatus_NotFound(t *testing.T) {
+// ---------------------------------------------------------------------------
+// PATCH /api/v1/cases/:caseId/documents/:docId/status
+// ---------------------------------------------------------------------------
+
+func TestTransitionStatus_MissingPhase(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t)
+	p := env.createPerson(t, c.ID)
+	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/00000000-0000-0000-0000-000000000000/status", map[string]any{
-		"status_key": "collected",
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
+		"status_id": d.OfficialCopyStatus.ID,
 	})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
 
+func TestTransitionStatus_MissingStatusID(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+	p := env.createPerson(t, c.ID)
+	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
+
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
+		"phase": "official_copy",
+	})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestTransitionStatus_InvalidPhase(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+	p := env.createPerson(t, c.ID)
+	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
+
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
+		"phase":     "signature",
+		"status_id": d.OfficialCopyStatus.ID,
+	})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestTransitionStatus_NonExistentStatusID(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+	p := env.createPerson(t, c.ID)
+	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
+
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
+		"phase":     "official_copy",
+		"status_id": "00000000-0000-0000-0000-000000000000",
+	})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestTransitionStatus_SoftDeleted(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+	p := env.createPerson(t, c.ID)
+	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
+
+	env.do("DELETE", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, nil)
+
+	// Use the document's own status ID so the 404 is due to soft-delete, not invalid input.
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
+		"phase":     "official_copy",
+		"status_id": d.OfficialCopyStatus.ID,
+	})
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assertNotFoundBody(t, rec)
 }
@@ -519,10 +576,32 @@ func TestTransitionStatus_WrongCase(t *testing.T) {
 	d := env.createDocument(t, caseA.ID, p.ID, "birth_certificate", "Some Doc")
 
 	rec := env.do("PATCH", "/api/v1/cases/"+caseB.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"status_key": "collected",
+		"phase":     "official_copy",
+		"status_id": d.OfficialCopyStatus.ID,
 	})
-
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestTransitionStatus_CrossPhase(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.createCase(t)
+	p := env.createPerson(t, c.ID)
+	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
+
+	// Find a status that is NOT valid for official_copy (not any, not official_copy).
+	var wrongStatusID string
+	err := env.db.QueryRowContext(context.Background(),
+		`SELECT id::text FROM document_statuses
+		 WHERE phase != 'any' AND phase != 'official_copy' AND is_system = true
+		 LIMIT 1`,
+	).Scan(&wrongStatusID)
+	require.NoError(t, err, "expected at least one non-any, non-official_copy status in DB")
+
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
+		"phase":     "official_copy",
+		"status_id": wrongStatusID,
+	})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // ---------------------------------------------------------------------------

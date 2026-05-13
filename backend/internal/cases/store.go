@@ -79,14 +79,9 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'researching')       AS cl_researching,
 			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'paused')            AS cl_paused,
 			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'ineligible')        AS cl_ineligible,
-			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'eligible')          AS cl_eligible,
-			COUNT(DISTINCT d.id)  FILTER (WHERE ds.progress_bucket = 'not_started') AS doc_not_started,
-			COUNT(DISTINCT d.id)  FILTER (WHERE ds.progress_bucket = 'in_progress') AS doc_in_progress,
-			COUNT(DISTINCT d.id)  FILTER (WHERE ds.progress_bucket = 'complete')    AS doc_complete
+			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'eligible')          AS cl_eligible
 		FROM cases c
 		LEFT JOIN claim_lines cl ON cl.case_id = c.id
-		LEFT JOIN documents d ON d.case_id = c.id
-		LEFT JOIN document_statuses ds ON ds.id = d.status_id
 		WHERE c.id = $1 AND c.deleted_at IS NULL
 		GROUP BY c.id`,
 		caseID,
@@ -94,7 +89,6 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 		&d.ID, &d.Title, &d.Status, &primaryRootPersonID, &d.CreatedAt, &d.UpdatedAt,
 		&d.ClaimLineSummary.NotYetResearched, &d.ClaimLineSummary.Researching,
 		&d.ClaimLineSummary.Paused, &d.ClaimLineSummary.Ineligible, &d.ClaimLineSummary.Eligible,
-		&d.DocumentProgress.NotStarted, &d.DocumentProgress.InProgress, &d.DocumentProgress.Complete,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

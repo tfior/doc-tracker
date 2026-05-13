@@ -91,7 +91,7 @@ The structure is consistent regardless of module size. This makes AI-assisted de
 | `people` | Person records, PersonRelationship | Imports nothing internal |
 | `claimlines` | ClaimLine records and status | Imports `people` |
 | `lifeevents` | LifeEvent records | Imports `people` |
-| `documents` | Document records, FileAttachment, canonical file logic | Imports `lifeevents`, `storage` |
+| `documents` | Document records, FileAttachment, canonical file logic; also hosts `GET /api/v1/document-statuses` until custom status management warrants its own package | Imports `lifeevents`, `storage` |
 | `storage` | File upload/download, object storage abstraction | Imports nothing internal |
 | `exports` | ZIP assembly, export downloads | Imports `cases`, `documents`, `storage` |
 
