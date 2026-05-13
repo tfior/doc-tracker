@@ -144,8 +144,8 @@ Authentication and full write operations. After this milestone the app is a func
 - [x] Add, edit, and remove document forms
 - [x] Reassign document to a different life event / person
 - [x] Document status transition UI (inline in Documents table + within edit modal)
-- [ ] Claim line create and status management UI
-- [ ] Trash view — list trashed entities with restore and permanent delete actions
+- [x] Claim line create and status management UI
+- [x] Trash view — list trashed entities with restore and permanent delete actions (per-case trash for people, life events, documents, claim lines; global trash in sidebar for deleted cases)
 
 ### Infrastructure
 
