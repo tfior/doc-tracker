@@ -14,6 +14,8 @@ import {
   listLifeEvents, createLifeEvent, updateLifeEvent, deleteLifeEvent,
   type LifeEvent, type UpdateLifeEventInput,
 } from '../../api/lifeevents';
+import { listDocuments, deleteDocument, type Document } from '../../api/documents';
+import DocumentFormModal from '../documents/DocumentFormModal';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -139,6 +141,7 @@ interface PersonFormProps {
   people: Person[];
   editing: Person | null;
   lifeEvents: LifeEvent[];
+  documents: Document[];
   onSubmit: (fields: UpdatePersonInput & { first_name: string; last_name: string }, parentIds: string[], childIds: string[]) => void;
   onClose: () => void;
   onAddLifeEvent: () => void;
@@ -146,15 +149,22 @@ interface PersonFormProps {
   onDeleteLifeEvent: (le: LifeEvent) => void;
   deletingLEId: string | null;
   onCancelDeleteLE: () => void;
+  onAddDocument: () => void;
+  onEditDocument: (doc: Document) => void;
+  onDeleteDocument: (doc: Document) => void;
+  deletingDocId: string | null;
+  onCancelDeleteDoc: () => void;
   loading: boolean;
   error: string;
 }
 
 function PersonForm({
-  people, editing, lifeEvents,
+  people, editing, lifeEvents, documents,
   onSubmit, onClose,
   onAddLifeEvent, onEditLifeEvent, onDeleteLifeEvent,
   deletingLEId, onCancelDeleteLE,
+  onAddDocument, onEditDocument, onDeleteDocument,
+  deletingDocId, onCancelDeleteDoc,
   loading, error,
 }: PersonFormProps) {
   const [firstName, setFirstName] = useState(editing?.first_name ?? '');
@@ -264,6 +274,41 @@ function PersonForm({
               </Group>
             ))}
           </Stack>
+
+          <Divider mt="xs" />
+          <Group justify="space-between" align="center">
+            <Text fw={500} size="sm">Documents</Text>
+            <Button size="xs" variant="light" onClick={onAddDocument}>Add</Button>
+          </Group>
+          {documents.length === 0 && (
+            <Text size="sm" c="dimmed">No documents yet.</Text>
+          )}
+          <Stack gap="xs">
+            {documents.map((doc) => (
+              <Group key={doc.id} justify="space-between" wrap="nowrap"
+                style={{ borderBottom: '1px solid var(--mantine-color-gray-2)', paddingBottom: 8 }}
+              >
+                <div>
+                  <Text size="sm" fw={500}>{doc.title}</Text>
+                  <Text size="xs" c="dimmed">
+                    {doc.document_type.replace(/_/g, ' ')} · {doc.official_copy_status?.label ?? '—'}
+                  </Text>
+                </div>
+                {deletingDocId === doc.id ? (
+                  <Group gap="xs" wrap="nowrap">
+                    <Text size="xs" c="dimmed">Delete?</Text>
+                    <Button size="xs" variant="subtle" onClick={onCancelDeleteDoc}>Cancel</Button>
+                    <Button size="xs" color="red" onClick={() => onDeleteDocument(doc)}>Delete</Button>
+                  </Group>
+                ) : (
+                  <Group gap="xs" wrap="nowrap">
+                    <Button size="xs" variant="subtle" onClick={() => onEditDocument(doc)}>Edit</Button>
+                    <Button size="xs" variant="subtle" color="red" onClick={() => onDeleteDocument(doc)}>Delete</Button>
+                  </Group>
+                )}
+              </Group>
+            ))}
+          </Stack>
         </>
       )}
     </Stack>
@@ -288,6 +333,11 @@ export default function PeoplePage() {
     queryFn: () => listLifeEvents(caseId!),
   });
 
+  const docsQuery = useQuery({
+    queryKey: ['documents', caseId],
+    queryFn: () => listDocuments(caseId!),
+  });
+
   // Person modal
   const [modalOpened, modalHandlers] = useDisclosure(false);
   const [deleteOpened, deleteHandlers] = useDisclosure(false);
@@ -301,12 +351,33 @@ export default function PeoplePage() {
   const [leFormError, setLEFormError] = useState('');
   const [deletingLEId, setDeletingLEId] = useState<string | null>(null);
 
+  // Document modal for person-level docs (nested inside person modal)
+  const [docFormOpened, docFormHandlers] = useDisclosure(false);
+  const [editingDoc, setEditingDoc] = useState<Document | null>(null);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+
+  // Document modal for life-event-level docs (nested inside life event modal)
+  const [leDocFormOpened, leDocFormHandlers] = useDisclosure(false);
+  const [leEditingDoc, setLEEditingDoc] = useState<Document | null>(null);
+  const [leDeletingDocId, setLEDeletingDocId] = useState<string | null>(null);
+
   const people = data?.items ?? [];
   const allEvents = eventsQuery.data?.items ?? [];
+  const allDocs = docsQuery.data?.items ?? [];
 
   // Life events for the person currently being edited
   const personLifeEvents = editingPerson
     ? allEvents.filter((e) => e.person_id === editingPerson.id)
+    : [];
+
+  // Documents for the person currently being edited
+  const personDocs = editingPerson
+    ? allDocs.filter((d) => d.person_id === editingPerson.id)
+    : [];
+
+  // Documents for the life event currently being edited
+  const leDocs = editingLE
+    ? allDocs.filter((d) => d.life_event_id === editingLE.id)
     : [];
 
   // ---------------------------------------------------------------------------
@@ -410,6 +481,24 @@ export default function PeoplePage() {
     },
   });
 
+  const leDocDeleteMutation = useMutation({
+    mutationFn: (docId: string) => deleteDocument(caseId!, docId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents', caseId] });
+      queryClient.invalidateQueries({ queryKey: ['life-events', caseId] });
+      setLEDeletingDocId(null);
+    },
+  });
+
+  const docDeleteMutation = useMutation({
+    mutationFn: (docId: string) => deleteDocument(caseId!, docId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents', caseId] });
+      queryClient.invalidateQueries({ queryKey: ['life-events', caseId] });
+      setDeletingDocId(null);
+    },
+  });
+
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
@@ -418,6 +507,7 @@ export default function PeoplePage() {
     setEditingPerson(null);
     setFormError('');
     setDeletingLEId(null);
+    setDeletingDocId(null);
     modalHandlers.open();
   }
 
@@ -425,6 +515,7 @@ export default function PeoplePage() {
     setEditingPerson(p);
     setFormError('');
     setDeletingLEId(null);
+    setDeletingDocId(null);
     modalHandlers.open();
   }
 
@@ -452,6 +543,31 @@ export default function PeoplePage() {
     } else {
       setDeletingLEId(le.id);
     }
+  }
+
+  function openAddDoc() {
+    setEditingDoc(null);
+    docFormHandlers.open();
+  }
+
+  function openEditDoc(doc: Document) {
+    setEditingDoc(doc);
+    docFormHandlers.open();
+  }
+
+  function handleDeleteDoc(doc: Document) {
+    if (deletingDocId === doc.id) {
+      docDeleteMutation.mutate(doc.id);
+    } else {
+      setDeletingDocId(doc.id);
+    }
+  }
+
+  function openAddLEDoc() { setLEEditingDoc(null); leDocFormHandlers.open(); }
+  function openEditLEDoc(doc: Document) { setLEEditingDoc(doc); leDocFormHandlers.open(); }
+  function handleDeleteLEDoc(doc: Document) {
+    if (leDeletingDocId === doc.id) { leDocDeleteMutation.mutate(doc.id); }
+    else { setLEDeletingDocId(doc.id); }
   }
 
   function handlePersonSubmit(
@@ -562,6 +678,7 @@ export default function PeoplePage() {
           people={people}
           editing={editingPerson}
           lifeEvents={personLifeEvents}
+          documents={personDocs}
           onSubmit={handlePersonSubmit}
           onClose={modalHandlers.close}
           onAddLifeEvent={openAddLifeEvent}
@@ -569,6 +686,11 @@ export default function PeoplePage() {
           onDeleteLifeEvent={handleDeleteLifeEvent}
           deletingLEId={deletingLEId}
           onCancelDeleteLE={() => setDeletingLEId(null)}
+          onAddDocument={openAddDoc}
+          onEditDocument={openEditDoc}
+          onDeleteDocument={handleDeleteDoc}
+          deletingDocId={deletingDocId}
+          onCancelDeleteDoc={() => setDeletingDocId(null)}
           loading={isSaving}
           error={formError}
         />
@@ -604,14 +726,75 @@ export default function PeoplePage() {
         title={editingLE ? `Edit — ${eventTypeLabel(editingLE.event_type)}` : 'Add Life Event'}
         size="lg"
       >
-        <LifeEventForm
-          editing={editingLE}
-          onSubmit={handleLESubmit}
-          onClose={leModalHandlers.close}
-          loading={leSaveMutation.isPending}
-          error={leFormError}
-        />
+        <Stack>
+          <LifeEventForm
+            editing={editingLE}
+            onSubmit={handleLESubmit}
+            onClose={leModalHandlers.close}
+            loading={leSaveMutation.isPending}
+            error={leFormError}
+          />
+          {editingLE && (
+            <>
+              <Divider mt="xs" />
+              <Group justify="space-between" align="center">
+                <Text fw={500} size="sm">Documents</Text>
+                <Button size="xs" variant="light" onClick={openAddLEDoc}>Add</Button>
+              </Group>
+              {leDocs.length === 0 && (
+                <Text size="sm" c="dimmed">No documents linked to this event yet.</Text>
+              )}
+              <Stack gap="xs">
+                {leDocs.map((doc) => (
+                  <Group key={doc.id} justify="space-between" wrap="nowrap"
+                    style={{ borderBottom: '1px solid var(--mantine-color-gray-2)', paddingBottom: 8 }}
+                  >
+                    <div>
+                      <Text size="sm" fw={500}>{doc.title}</Text>
+                      <Text size="xs" c="dimmed">
+                        {doc.document_type.replace(/_/g, ' ')} · {doc.official_copy_status?.label ?? '—'}
+                      </Text>
+                    </div>
+                    {leDeletingDocId === doc.id ? (
+                      <Group gap="xs" wrap="nowrap">
+                        <Text size="xs" c="dimmed">Delete?</Text>
+                        <Button size="xs" variant="subtle" onClick={() => setLEDeletingDocId(null)}>Cancel</Button>
+                        <Button size="xs" color="red" onClick={() => handleDeleteLEDoc(doc)}>Delete</Button>
+                      </Group>
+                    ) : (
+                      <Group gap="xs" wrap="nowrap">
+                        <Button size="xs" variant="subtle" onClick={() => openEditLEDoc(doc)}>Edit</Button>
+                        <Button size="xs" variant="subtle" color="red" onClick={() => handleDeleteLEDoc(doc)}>Delete</Button>
+                      </Group>
+                    )}
+                  </Group>
+                ))}
+              </Stack>
+            </>
+          )}
+        </Stack>
       </Modal>
+
+      {/* Document modal for life-event-level docs (nested inside life event modal) */}
+      <DocumentFormModal
+        caseId={caseId!}
+        editing={leEditingDoc}
+        opened={leDocFormOpened}
+        onClose={leDocFormHandlers.close}
+        onSuccess={leDocFormHandlers.close}
+        lockedPersonId={editingPerson?.id}
+        lockedLifeEventId={editingLE?.id}
+      />
+
+      {/* Document create/edit modal — nested on top of person modal */}
+      <DocumentFormModal
+        caseId={caseId!}
+        editing={editingDoc}
+        opened={docFormOpened}
+        onClose={docFormHandlers.close}
+        onSuccess={docFormHandlers.close}
+        lockedPersonId={editingPerson?.id}
+      />
     </>
   );
 }

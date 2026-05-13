@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import {
   Title, Table, Text, Loader, Alert, Button, Group, Stack,
-  Modal, TextInput, Select, Badge,
+  Modal, TextInput, Select, Badge, Divider,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { listPeople, type Person } from '../../api/people';
@@ -12,6 +12,8 @@ import {
   deleteLifeEvent, reassignLifeEvent,
   type LifeEvent, type CreateLifeEventInput, type UpdateLifeEventInput,
 } from '../../api/lifeevents';
+import { listDocuments, deleteDocument, type Document } from '../../api/documents';
+import DocumentFormModal from '../documents/DocumentFormModal';
 
 const EVENT_TYPE_OPTIONS = [
   { value: 'birth', label: 'Birth' },
@@ -151,14 +153,28 @@ export default function LifeEventsPage() {
     queryFn: () => listLifeEvents(caseId!),
   });
 
+  const docsQuery = useQuery({
+    queryKey: ['documents', caseId],
+    queryFn: () => listDocuments(caseId!),
+  });
+
   const [modalOpened, modalHandlers] = useDisclosure(false);
   const [deleteOpened, deleteHandlers] = useDisclosure(false);
   const [editingEvent, setEditingEvent] = useState<LifeEvent | null>(null);
   const [deletingEvent, setDeletingEvent] = useState<LifeEvent | null>(null);
   const [formError, setFormError] = useState('');
 
+  const [docFormOpened, docFormHandlers] = useDisclosure(false);
+  const [editingDoc, setEditingDoc] = useState<Document | null>(null);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+
   const people = peopleQuery.data?.items ?? [];
   const events = eventsQuery.data?.items ?? [];
+  const allDocs = docsQuery.data?.items ?? [];
+
+  const eventDocs = editingEvent
+    ? allDocs.filter((d) => d.life_event_id === editingEvent.id)
+    : [];
 
   const createMutation = useMutation({
     mutationFn: ({ personId, fields }: { personId: string; fields: CreateLifeEventInput }) =>
@@ -207,16 +223,34 @@ export default function LifeEventsPage() {
     onError: () => setFormError('Failed to delete. Please try again.'),
   });
 
+  const docDeleteMutation = useMutation({
+    mutationFn: (docId: string) => deleteDocument(caseId!, docId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents', caseId] });
+      queryClient.invalidateQueries({ queryKey: ['life-events', caseId] });
+      setDeletingDocId(null);
+    },
+  });
+
   function openCreate() {
     setEditingEvent(null);
     setFormError('');
+    setDeletingDocId(null);
     modalHandlers.open();
   }
 
   function openEdit(e: LifeEvent) {
     setEditingEvent(e);
     setFormError('');
+    setDeletingDocId(null);
     modalHandlers.open();
+  }
+
+  function openAddDoc() { setEditingDoc(null); docFormHandlers.open(); }
+  function openEditDoc(doc: Document) { setEditingDoc(doc); docFormHandlers.open(); }
+  function handleDeleteDoc(doc: Document) {
+    if (deletingDocId === doc.id) { docDeleteMutation.mutate(doc.id); }
+    else { setDeletingDocId(doc.id); }
   }
 
   function openDelete(e: LifeEvent) {
@@ -320,15 +354,65 @@ export default function LifeEventsPage() {
         title={modalTitle()}
         size="lg"
       >
-        <LifeEventForm
-          people={people}
-          editing={editingEvent}
-          onSubmit={handleSubmit}
-          onClose={modalHandlers.close}
-          loading={isSaving}
-          error={formError}
-        />
+        <Stack>
+          <LifeEventForm
+            people={people}
+            editing={editingEvent}
+            onSubmit={handleSubmit}
+            onClose={modalHandlers.close}
+            loading={isSaving}
+            error={formError}
+          />
+          {editingEvent && (
+            <>
+              <Divider mt="xs" />
+              <Group justify="space-between" align="center">
+                <Text fw={500} size="sm">Documents</Text>
+                <Button size="xs" variant="light" onClick={openAddDoc}>Add</Button>
+              </Group>
+              {eventDocs.length === 0 && (
+                <Text size="sm" c="dimmed">No documents linked to this event yet.</Text>
+              )}
+              <Stack gap="xs">
+                {eventDocs.map((doc) => (
+                  <Group key={doc.id} justify="space-between" wrap="nowrap"
+                    style={{ borderBottom: '1px solid var(--mantine-color-gray-2)', paddingBottom: 8 }}
+                  >
+                    <div>
+                      <Text size="sm" fw={500}>{doc.title}</Text>
+                      <Text size="xs" c="dimmed">
+                        {doc.document_type.replace(/_/g, ' ')} · {doc.official_copy_status?.label ?? '—'}
+                      </Text>
+                    </div>
+                    {deletingDocId === doc.id ? (
+                      <Group gap="xs" wrap="nowrap">
+                        <Text size="xs" c="dimmed">Delete?</Text>
+                        <Button size="xs" variant="subtle" onClick={() => setDeletingDocId(null)}>Cancel</Button>
+                        <Button size="xs" color="red" onClick={() => handleDeleteDoc(doc)}>Delete</Button>
+                      </Group>
+                    ) : (
+                      <Group gap="xs" wrap="nowrap">
+                        <Button size="xs" variant="subtle" onClick={() => openEditDoc(doc)}>Edit</Button>
+                        <Button size="xs" variant="subtle" color="red" onClick={() => handleDeleteDoc(doc)}>Delete</Button>
+                      </Group>
+                    )}
+                  </Group>
+                ))}
+              </Stack>
+            </>
+          )}
+        </Stack>
       </Modal>
+
+      <DocumentFormModal
+        caseId={caseId!}
+        editing={editingDoc}
+        opened={docFormOpened}
+        onClose={docFormHandlers.close}
+        onSuccess={docFormHandlers.close}
+        lockedPersonId={editingEvent?.person_id}
+        lockedLifeEventId={editingEvent?.id}
+      />
 
       <Modal opened={deleteOpened} onClose={deleteHandlers.close} title="Delete Life Event">
         <Stack>
