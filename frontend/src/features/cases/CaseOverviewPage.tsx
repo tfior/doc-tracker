@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
   Title, Text, Loader, Alert, Group, Badge, Stack,
   Card, List, ThemeIcon, Button, Modal, TextInput, Select,
@@ -155,11 +155,6 @@ export default function CaseOverviewPage() {
           </Card>
         )}
 
-        {/* Navigation */}
-        <Group gap="md">
-          <Link to={`/cases/${caseId}/people`}>People</Link>
-          <Link to={`/cases/${caseId}/documents`}>Documents</Link>
-        </Group>
       </Stack>
 
       {/* Edit modal */}

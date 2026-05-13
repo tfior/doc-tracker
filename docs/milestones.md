@@ -102,7 +102,7 @@ Authentication and full write operations. After this milestone the app is a func
 - A user can add, edit, and remove life events
 - A user can add, edit, and remove documents (metadata only — no file upload yet)
 - A user can manually transition a document's status
-- A user can create and update claim lines
+- A user can create and update claim lines (root person + status + notes; explicit path through the lineage graph deferred post-MVP)
 - Deleted entities go to a trash view; trashed entities are frozen until restored or permanently deleted
 - A user can restore a trashed entity or permanently delete it immediately
 - A user can reassign a LifeEvent to a different Person within the same Case
@@ -136,14 +136,14 @@ Authentication and full write operations. After this milestone the app is a func
 
 - [x] Login page and logout action
 - [x] Auth-aware routing — redirect to login if no active session
-- [ ] Create and edit case forms
-- [ ] Add, edit, and remove person forms
-- [ ] Parent-child relationship UI (Parents field: up to 2; Children field: unlimited; same-case scope)
-- [ ] Add, edit, and remove life event forms
-- [ ] Reassign life event to a different person
-- [ ] Add, edit, and remove document forms
-- [ ] Reassign document to a different life event / person
-- [ ] Document status transition UI
+- [x] Create and edit case forms
+- [x] Add, edit, and remove person forms
+- [x] Parent-child relationship UI (Parents field: up to 2; Children field: unlimited; same-case scope)
+- [x] Add, edit, and remove life event forms
+- [x] Reassign life event to a different person
+- [x] Add, edit, and remove document forms
+- [x] Reassign document to a different life event / person
+- [x] Document status transition UI (inline in Documents table + within edit modal)
 - [ ] Claim line create and status management UI
 - [ ] Trash view — list trashed entities with restore and permanent delete actions
 

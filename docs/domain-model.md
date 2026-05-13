@@ -52,6 +52,8 @@ The top-level container for a document collection effort. One case may have mult
 ### ClaimLine
 One candidate lineage path through the case's person graph. Always present, even for simple single-LIRA cases (status: eligible). Supports mid-case pivots and multi-line eligibility research without structural rebuilds.
 
+`root_person_id` is the LIRA (lineage-relevant ancestor) at the top of the line. The full ordered path from root to applicant is a post-MVP addition (see `ClaimLineMember` in Could).
+
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid | |
@@ -276,6 +278,7 @@ A physical file attached to a Document. One attachment is marked canonical at an
 - Checklist/Task entity for lightweight user-driven progress tracking
 - Document progress computation (derive overall progress bucket from four phase statuses)
 - Admin UI for managing user-defined DocumentStatus entries
+- `ClaimLineMember` — explicit ordered path from root person to applicant. A `claim_line_members` table with `(claim_line_id, person_id, position)` making the specific genealogical route unambiguous. Required when multiple paths exist between root and applicant due to branching parentage. Current MVP stores only `root_person_id`; the full path is implied by the `person_relationships` graph.
 - Async export job records with file manifest
 - DocumentNameRecord — structured AKA / name variant per document
 - NameDiscrepancy records with severity and resolution status

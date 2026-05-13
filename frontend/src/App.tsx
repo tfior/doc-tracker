@@ -8,6 +8,9 @@ import CaseOverviewPage from './features/cases/CaseOverviewPage';
 import PeoplePage from './features/people/PeoplePage';
 import DocumentsPage from './features/documents/DocumentsPage';
 import LifeEventsPage from './features/life-events/LifeEventsPage';
+import ClaimLinesPage from './features/claim-lines/ClaimLinesPage';
+import TrashPage from './features/trash/TrashPage';
+import GlobalTrashPage from './features/trash/GlobalTrashPage';
 
 function CaseNav() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -18,6 +21,7 @@ function CaseNav() {
       <Anchor component={Link} to={`/cases/${caseId}/life-events`} size="sm">Life Events</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/documents`} size="sm">Documents</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/claim-lines`} size="sm">Claim Lines</Anchor>
+
       <Anchor component={Link} to={`/cases/${caseId}/trash`} size="sm">Trash</Anchor>
     </Group>
   );
@@ -58,6 +62,7 @@ function AppLayout() {
 
       <AppShell.Navbar p="xs">
         <NavLink component={Link} to="/cases" label="Cases" />
+        <NavLink component={Link} to="/trash" label="Trash" />
       </AppShell.Navbar>
 
       <AppShell.Main>
@@ -75,8 +80,9 @@ export default function App() {
         <Route element={<RequireAuth />}>
           <Route element={<AppLayout />}>
             <Route path="/" element={<Navigate to="/cases" replace />} />
+            <Route path="/trash" element={<GlobalTrashPage />} />
             <Route path="/cases" element={<CaseListPage />} />
-            <Route path="/cases/:caseId" element={<CaseOverviewPage />} />
+            <Route path="/cases/:caseId" element={<><CaseNav /><CaseOverviewPage /></>} />
             <Route
               path="/cases/:caseId/people"
               element={<><CaseNav /><PeoplePage /></>}
@@ -88,6 +94,14 @@ export default function App() {
             <Route
               path="/cases/:caseId/documents"
               element={<><CaseNav /><DocumentsPage /></>}
+            />
+            <Route
+              path="/cases/:caseId/claim-lines"
+              element={<><CaseNav /><ClaimLinesPage /></>}
+            />
+            <Route
+              path="/cases/:caseId/trash"
+              element={<><CaseNav /><TrashPage /></>}
             />
           </Route>
         </Route>

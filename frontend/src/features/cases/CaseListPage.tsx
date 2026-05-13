@@ -208,8 +208,8 @@ export default function CaseListPage() {
       >
         <Stack>
           <Text>
-            Move <strong>{deletingCase?.title}</strong> to trash? It can be restored from the trash
-            view.
+            Move <strong>{deletingCase?.title}</strong> to trash? It can be restored from the{' '}
+            <strong>Trash</strong> section in the sidebar.
           </Text>
           {formError && <Alert color="red">{formError}</Alert>}
           <Group justify="flex-end">

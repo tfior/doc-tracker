@@ -52,7 +52,7 @@ func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int
 			birth_date::text, birth_place,
 			death_date::text, notes,
 			created_at, updated_at,
-			ARRAY(SELECT parent_id::text FROM person_relationships WHERE person_id = people.id ORDER BY parent_id) AS parent_ids
+			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN people pa ON pa.id = pr.parent_id AND pa.deleted_at IS NULL WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
 		FROM people
 		WHERE case_id = $1 AND deleted_at IS NULL
 		ORDER BY birth_date ASC NULLS LAST
@@ -154,7 +154,7 @@ func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person
 			birth_date::text, birth_place,
 			death_date::text, notes,
 			created_at, updated_at,
-			ARRAY(SELECT parent_id::text FROM person_relationships WHERE person_id = people.id ORDER BY parent_id) AS parent_ids
+			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN people pa ON pa.id = pr.parent_id AND pa.deleted_at IS NULL WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
 		FROM people
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		personID, caseID,
