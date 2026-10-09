@@ -4,7 +4,7 @@ export
 .PHONY: dev migrate seed create-user test backend frontend
 
 dev:
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up db minio
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up db
 
 backend:
 	cd backend && go run ./cmd/server
