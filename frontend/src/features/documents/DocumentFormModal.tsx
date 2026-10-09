@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Modal, Stack, Group, TextInput, Select, Checkbox, Divider,
@@ -135,12 +135,15 @@ export default function DocumentFormModal({
   const [formError, setFormError] = useState('');
 
   // Reset form when modal opens with a different document
-  useEffect(() => {
-    if (opened) {
+  const resetKey = opened ? (editing?.id ?? 'new') : null;
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey);
+    if (resetKey !== null) {
       setForm(initForm(editing, lockedPersonId, lockedLifeEventId));
       setFormError('');
     }
-  }, [opened, editing?.id]);
+  }
 
   const people = peopleQuery.data?.items ?? [];
   const lifeEvents = eventsQuery.data?.items ?? [];

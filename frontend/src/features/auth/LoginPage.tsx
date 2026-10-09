@@ -10,7 +10,7 @@ import {
   Alert,
   Stack,
 } from '@mantine/core';
-import { useAuth } from './AuthProvider';
+import { useAuth } from './authContext';
 import { ApiError } from '../../api/client';
 
 export default function LoginPage() {

@@ -1,7 +1,8 @@
 import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom';
 import { AppShell, NavLink, Title, Group, Anchor, Button, Loader, Center } from '@mantine/core';
 import { Link, useParams } from 'react-router-dom';
-import { AuthProvider, useAuth } from './features/auth/AuthProvider';
+import { AuthProvider } from './features/auth/AuthProvider';
+import { useAuth } from './features/auth/authContext';
 import LoginPage from './features/auth/LoginPage';
 import CaseListPage from './features/cases/CaseListPage';
 import CaseOverviewPage from './features/cases/CaseOverviewPage';
