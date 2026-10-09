@@ -4,7 +4,7 @@ export
 .PHONY: dev migrate seed create-user test backend frontend
 
 dev:
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up db minio
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up db
 
 backend:
 	cd backend && go run ./cmd/server
@@ -22,4 +22,4 @@ create-user:
 	cd backend && go run ./cmd/create-user
 
 test: ## requires 'make dev' (postgres) to be running
-	cd backend && go test -p 1 ./...
+	cd backend && go test -count=1 -p 1 ./...

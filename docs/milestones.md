@@ -152,3 +152,13 @@ Authentication and full write operations. After this milestone the app is a func
 - [x] Sessions stored server-side in memory (database-backed sessions deferred)
 - [x] `make create-user` target — prompts for email, first name, last name, password; inserts a new user record; separate from seed data
 - [x] GitHub Actions CI — runs `go test ./...` against a postgres service on push to main and on all pull requests
+
+---
+
+## Milestone 3 — File upload and export
+
+Not yet defined. Scope is the remaining MVP Must items: file upload to S3-compatible storage and ZIP export of canonical files and all files per case.
+
+### Open Decisions
+
+- **Local object storage for development.** MinIO was removed from Docker Compose because its image is no longer published and the project is no longer maintained. The dev stack currently runs PostgreSQL only. An S3-compatible replacement must be chosen and added back to Docker Compose before the `storage` module is built. The `STORAGE_*` variables in `.env.example` are retained for it.

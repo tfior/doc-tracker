@@ -4,6 +4,9 @@
 # Go
 backend/bin/
 backend/tmp/
+/backend/seed
+/backend/server
+/backend/create-user
 
 # Node
 frontend/node_modules/
