@@ -14,7 +14,7 @@ The `docs/` folder is the authoritative reference for project decisions. Keep th
 | `architecture.md` | Stack choices, module boundaries, repo structure, backend package structure, and architectural constraints. |
 | `api-conventions.md` | HTTP API design conventions, URL patterns, request/response shapes, error formats, auth conventions. |
 | `milestones.md` | Implementation milestones, acceptance criteria, and task checklists. |
-| `CLAUDE.md` | This file. Instructions for AI-assisted development. |
+| `CLAUDE.md` (repo root) | This file. Instructions for AI-assisted development. |
 
 ### When to Update
 

@@ -245,7 +245,7 @@ A physical file attached to a Document. One attachment is marked canonical at an
 24. Only directly-deleted entities appear in the trash. Children of a trashed entity are hidden implicitly — their own `deleted_at` remains null and they do not appear in the trash independently.
 25. A trashed entity and all its implicitly-hidden children are frozen: no edits, no reassignment, no new children may be added until the parent is restored.
 26. Restoring a trashed entity automatically restores all implicitly-hidden children (they were never independently deleted).
-27. Trashed entities are permanently hard-deleted after 30 days. All descendant entities are permanently deleted via DB-level `ON DELETE CASCADE` foreign keys.
+27. Trashed entities are permanently hard-deleted after 30 days. All descendant entities are permanently deleted via DB-level `ON DELETE CASCADE` foreign keys. The automatic 30-day purge is not yet implemented: trashed entities currently remain in the trash until a user restores or permanently deletes them.
 28. If a LifeEvent is permanently deleted, its Documents are also permanently deleted (CASCADE). If the user wants a Document to survive the deletion of its LifeEvent, they must reassign the Document to another event (or ungroup it) before deleting the event.
 29. If a user explicitly deletes a child entity while its parent is still active (e.g., deletes a Document while the Person and LifeEvent are active), that child appears in the trash independently and follows its own 30-day clock.
 30. PersonRelationship uses hard-delete only. Deleted relationships are gone immediately with no trash period.
