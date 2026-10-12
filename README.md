@@ -76,3 +76,7 @@ The backend tests run against a real PostgreSQL database (`doctracker_test`), wh
 ## Deployment
 
 The app is designed to be self-hostable. All infrastructure settings come from environment variables (see [.env.example](.env.example)), and no hosting provider is assumed.
+
+## License
+
+doc-tracker is licensed under the [Mozilla Public License 2.0](LICENSE).
