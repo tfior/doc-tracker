@@ -69,6 +69,7 @@ The top-level container for a document collection effort. One case may have mult
 | title | text | |
 | status | enum | active, archived, complete |
 | primary_root_person_id | uuid? | FK → Person; nullable until the root ancestor is confirmed |
+| version | integer | increases on every change; used to detect concurrent edits |
 | created_at | timestamp | |
 | updated_at | timestamp | |
 | deleted_at | timestamp? | null = active; set = trashed |
@@ -87,6 +88,7 @@ One candidate lineage path through the case's person graph. Always present, even
 | root_person_id | uuid | FK → Person; immutable after creation |
 | status | enum | not_yet_researched, researching, paused, ineligible, eligible |
 | notes | text? | |
+| version | integer | increases on every change; used to detect concurrent edits |
 | created_at | timestamp | |
 | updated_at | timestamp | |
 | deleted_at | timestamp? | null = active; set = trashed |
@@ -105,6 +107,7 @@ A Person has no birth or death fields of its own. Birth date, birth place, and d
 | first_name | text | |
 | last_name | text | |
 | notes | text? | |
+| version | integer | increases on every change; used to detect concurrent edits |
 | created_at | timestamp | |
 | updated_at | timestamp | |
 | deleted_at | timestamp? | null = active; set = trashed |
@@ -150,6 +153,7 @@ A LifeEvent may be reassigned to a different Person within the same Case. Cross-
 | divorce_date | qualified date? | marriage events only; set when the marriage ended in divorce |
 | divorce_place | text? | marriage events only; where the divorce was granted |
 | notes | text? | |
+| version | integer | increases on every change; used to detect concurrent edits |
 | created_at | timestamp | |
 | updated_at | timestamp | |
 | deleted_at | timestamp? | null = active; set = trashed |
@@ -228,6 +232,7 @@ A Document may be reassigned to a different LifeEvent within the same Case, incl
 | details_checked_by | uuid? | FK → User |
 | details_checked_file_id | uuid? | FK → FileAttachment; the submission file that was current when the check was made; null if none had been uploaded |
 | notes | text? | AKA variants, discrepancies, amendment history narrative |
+| version | integer | increases on every change; used to detect concurrent edits |
 | created_at | timestamp | |
 | updated_at | timestamp | |
 | deleted_at | timestamp? | null = active; set = trashed |
@@ -294,27 +299,29 @@ A **supporting** file is anything else worth keeping with the document, such as 
 7. `Case.primary_root_person_id` reflects the confirmed root ancestor. It may be null during eligibility research.
 8. A Person's birth and death facts live on LifeEvents. A Person has at most one birth event and at most one death event.
 
+9. Case, Person, LifeEvent, Document, and ClaimLine each carry a `version` that increases on every change. A change must state the version it was based on. If the record has changed since, the change is refused and nothing is saved, so one user's save never silently overwrites another's.
+
 ### Marriages and Spouses
 
-9. A spouse is a Person record only when they are in a line being explored. Otherwise their details live on the marriage LifeEvent as flat fields (`spouse_name`, `spouse_birth_date`, `spouse_birth_place`).
-10. When both spouses are Persons in the Case, the marriage is a single LifeEvent with `person_id` set to one and `spouse_person_id` set to the other. The flat spouse fields are not used; the spouse's name and birth details come from the linked Person.
-11. `spouse_person_id` must refer to a Person in the same Case, other than the event's `person_id`.
-12. A Person's LifeEvents are those where they are the `person_id` or the `spouse_person_id`. A shared marriage and its Documents appear under both people.
-13. A flat-field spouse can be promoted to a Person: a Person is created from the flat fields and the marriage event is linked to them, in a single transaction.
-14. A shared marriage is hidden, frozen, or permanently deleted along with a Person only when that is true of both spouses. If one spouse is trashed, the marriage stays active under the other. If one spouse is permanently deleted, the marriage and its Documents stay with the surviving spouse, and the deleted spouse's name is kept in `spouse_name`.
+10. A spouse is a Person record only when they are in a line being explored. Otherwise their details live on the marriage LifeEvent as flat fields (`spouse_name`, `spouse_birth_date`, `spouse_birth_place`).
+11. When both spouses are Persons in the Case, the marriage is a single LifeEvent with `person_id` set to one and `spouse_person_id` set to the other. The flat spouse fields are not used; the spouse's name and birth details come from the linked Person.
+12. `spouse_person_id` must refer to a Person in the same Case, other than the event's `person_id`.
+13. A Person's LifeEvents are those where they are the `person_id` or the `spouse_person_id`. A shared marriage and its Documents appear under both people.
+14. A flat-field spouse can be promoted to a Person: a Person is created from the flat fields and the marriage event is linked to them, in a single transaction.
+15. A shared marriage is hidden, frozen, or permanently deleted along with a Person only when that is true of both spouses. If one spouse is trashed, the marriage stays active under the other. If one spouse is permanently deleted, the marriage and its Documents stay with the surviving spouse, and the deleted spouse's name is kept in `spouse_name`.
 
 ### Document Phases
 
-15. A Document always has four non-nullable phase status fields. All four are initialized at creation with their phase default: official_copy → Not Started, amendment → Unknown, apostille → Not Started, translation → Not Started.
-16. Document phase status transitions are free — any status to any status within the same phase. No state machine is enforced.
-17. A phase status of "Not Required" (progress_bucket: complete) signifies that phase does not apply to this document. For the official_copy phase, "Not Required" means the entire document is not needed for the case.
-18. A `phase` of `any` on a DocumentStatus means the status appears in all four phase pickers.
-19. System DocumentStatus entries cannot be edited or deleted by users.
-20. User-defined DocumentStatus entries are global (shared across all cases). The admin UI for creating them is deferred post-MVP.
+16. A Document always has four non-nullable phase status fields. All four are initialized at creation with their phase default: official_copy → Not Started, amendment → Unknown, apostille → Not Started, translation → Not Started.
+17. Document phase status transitions are free — any status to any status within the same phase. No state machine is enforced.
+18. A phase status of "Not Required" (progress_bucket: complete) signifies that phase does not apply to this document. For the official_copy phase, "Not Required" means the entire document is not needed for the case.
+19. A `phase` of `any` on a DocumentStatus means the status appears in all four phase pickers.
+20. System DocumentStatus entries cannot be edited or deleted by users.
+21. User-defined DocumentStatus entries are global (shared across all cases). The admin UI for creating them is deferred post-MVP.
 
 ### Readiness
 
-21. Every Document has a readiness status derived from its phase statuses and `details_checked`:
+22. Every Document has a readiness status derived from its phase statuses and `details_checked`:
 
     | Status | Rule |
     |---|---|
@@ -323,70 +330,70 @@ A **supporting** file is anything else worth keeping with the document, such as 
     | not_started | The document is needed and all four phases are in the `not_started` progress bucket |
     | in_progress | Anything else |
 
-22. A needed Document that is not ready reports why: each phase that is not complete, and whether the details have been checked.
-23. Readiness does not depend on whether a file has been uploaded. A ready Document with no submission file is reported by the Application Files export.
-24. Case progress is the count of the case's needed Documents in each readiness status.
-25. The outstanding list for a case contains every needed Document that is not ready. Each appears once, under the earliest thing it is waiting on, in this order: official copy, amendment, apostille, translation, details check. The list can be grouped by that stage or by Person.
+23. A needed Document that is not ready reports why: each phase that is not complete, and whether the details have been checked.
+24. Readiness does not depend on whether a file has been uploaded. A ready Document with no submission file is reported by the Application Files export.
+25. Case progress is the count of the case's needed Documents in each readiness status.
+26. The outstanding list for a case contains every needed Document that is not ready. Each appears once, under the earliest thing it is waiting on, in this order: official copy, amendment, apostille, translation, details check. The list can be grouped by that stage or by Person.
 
 ### Files
 
-26. Files are uploaded directly to object storage via the backend using multipart form upload. Presigned URLs are not used for MVP.
-27. Object storage buckets must have server-side encryption (SSE) enabled. This is a deployment requirement, not enforced in application code.
-28. Uploading a submission file makes it the current version. Earlier versions are retained, never deleted, and any of them can be restored to current.
-29. A Document has at most one current submission file. This is enforced by the database.
-30. When uploading a submission file, the user may flag it as changing the recorded details. Doing so clears `details_checked`.
-31. Uploading a file never changes a phase status.
+27. Files are uploaded directly to object storage via the backend using multipart form upload. Presigned URLs are not used for MVP.
+28. Object storage buckets must have server-side encryption (SSE) enabled. This is a deployment requirement, not enforced in application code.
+29. Uploading a submission file makes it the current version. Earlier versions are retained, never deleted, and any of them can be restored to current.
+30. A Document has at most one current submission file. This is enforced by the database.
+31. When uploading a submission file, the user may flag it as changing the recorded details. Doing so clears `details_checked`.
+32. Uploading a file never changes a phase status.
 
 ### Exports
 
-32. The Application Files export for a case contains the current submission file of every ready Document, and nothing else.
-33. The Application Files export is accompanied by a single summary covering every needed Document in the case: each Document it included, with the file exported for it, and each Document it left out, with the reason (not ready, or ready but with no submission file).
-34. The All Files export for a case contains every FileAttachment of every Document: all submission file versions and all supporting files.
+33. The Application Files export for a case contains the current submission file of every ready Document, and nothing else.
+34. The Application Files export is accompanied by a single summary covering every needed Document in the case: each Document it included, with the file exported for it, and each Document it left out, with the reason (not ready, or ready but with no submission file).
+35. The All Files export for a case contains every FileAttachment of every Document: all submission file versions and all supporting files.
 
 ### Dates
 
-35. A partial date may be a year, a year and month, or a full date. A less precise date is compatible with any more precise date that falls within it: `1890` is compatible with `1890-03-15`.
-36. Working dates are qualified dates. These are `LifeEvent.event_date`, `LifeEvent.spouse_birth_date`, and `LifeEvent.divorce_date`.
-37. Document dates (`issue_date`, `registration_date`, `recorded_birth_date`) are partial dates with no qualifier. They transcribe what the document says.
-38. A recorded age is stored as the number the document gives, never converted to a birth year. An age implies a twelve-month birth window that usually spans two calendar years. When the Document's LifeEvent has an exact full date, the UI shows that window next to the age: age 25 at an event on 1921-06-10 implies a birth between 1895-06-11 and 1896-06-10.
+36. A partial date may be a year, a year and month, or a full date. A less precise date is compatible with any more precise date that falls within it: `1890` is compatible with `1890-03-15`.
+37. Working dates are qualified dates. These are `LifeEvent.event_date`, `LifeEvent.spouse_birth_date`, and `LifeEvent.divorce_date`.
+38. Document dates (`issue_date`, `registration_date`, `recorded_birth_date`) are partial dates with no qualifier. They transcribe what the document says.
+39. A recorded age is stored as the number the document gives, never converted to a birth year. An age implies a twelve-month birth window that usually spans two calendar years. When the Document's LifeEvent has an exact full date, the UI shows that window next to the age: age 25 at an event on 1921-06-10 implies a birth between 1895-06-11 and 1896-06-10.
 
 ### Recorded Details
 
-39. A Document's recorded details are its own `recorded_*` fields, which describe its subject, and its DocumentNamedPerson entries, which describe the other people it names. `details_checked` attests to all of them.
-40. A DocumentNamedPerson may be linked only to a Person in the same Case, and not to the Document's own subject.
-41. Everything recorded about a Person is the `recorded_*` fields of that Person's own Documents together with every DocumentNamedPerson entry linked to them. The person screen shows these side by side, one row per Document, with the recorded name, the birth date or the age with its implied birth window, and the birth place. Comparison is by eye; automatic discrepancy flagging is deferred post-MVP.
-42. Changes to a Document's DocumentNamedPerson entries are logged as part of that Document's `updated` ActivityLog entry.
+40. A Document's recorded details are its own `recorded_*` fields, which describe its subject, and its DocumentNamedPerson entries, which describe the other people it names. `details_checked` attests to all of them.
+41. A DocumentNamedPerson may be linked only to a Person in the same Case, and not to the Document's own subject.
+42. Everything recorded about a Person is the `recorded_*` fields of that Person's own Documents together with every DocumentNamedPerson entry linked to them. The person screen shows these side by side, one row per Document, with the recorded name, the birth date or the age with its implied birth window, and the birth place. Comparison is by eye; automatic discrepancy flagging is deferred post-MVP.
+43. Changes to a Document's DocumentNamedPerson entries are logged as part of that Document's `updated` ActivityLog entry.
 
 ### Activity Log
 
-43. ActivityLog entries are append-only. They are never updated. They are removed only when their Case is permanently deleted.
-44. `ActivityLog.entity_name` is captured at the time of the action and is not updated if the entity is later renamed or deleted.
-45. `ActivityLog.changes` stores field-level diffs for `updated` actions only, with the old and new value of each field whose value changed. It is null for all other actions.
-46. Activity log entries are written for all write operations on case-scoped entities (cases, people, person relationships, life events, documents, file attachments, claim lines), including restore and permanent delete.
-47. An activity log entry is written in the same database transaction as the change it records. If either fails, neither is saved.
+44. ActivityLog entries are append-only. They are never updated. They are removed only when their Case is permanently deleted.
+45. `ActivityLog.entity_name` is captured at the time of the action and is not updated if the entity is later renamed or deleted.
+46. `ActivityLog.changes` stores field-level diffs for `updated` actions only, with the old and new value of each field whose value changed. It is null for all other actions.
+47. Activity log entries are written for all write operations on case-scoped entities (cases, people, person relationships, life events, documents, file attachments, claim lines), including restore and permanent delete.
+48. An activity log entry is written in the same database transaction as the change it records. If either fails, neither is saved.
 
 ### Soft-delete and Trash
 
-48. Case, Person, LifeEvent, Document, and ClaimLine have a `deleted_at` column. A null value means active; a non-null value means trashed. PersonRelationship and FileAttachment have no soft-delete.
-49. All read queries filter `WHERE deleted_at IS NULL`. Trashed entities are excluded from normal results and only appear in the trash view.
-50. Only directly-deleted entities appear in the trash. Children of a trashed entity are hidden implicitly — their own `deleted_at` remains null and they do not appear in the trash independently.
-51. A trashed entity and all its implicitly-hidden children are frozen: no edits, no reassignment, no new children may be added until the parent is restored.
-52. Restoring a trashed entity automatically restores all implicitly-hidden children (they were never independently deleted).
-53. Trashed entities are permanently hard-deleted after 30 days. All descendant entities are permanently deleted via DB-level `ON DELETE CASCADE` foreign keys.
-54. Permanently deleting a Document, directly or through a parent, also deletes its files from object storage.
-55. Permanently deleting a Case, by a user or by the 30-day purge, writes a CaseDeletionRecord in the same transaction. The case's ActivityLog entries are deleted with it.
-56. If a LifeEvent is permanently deleted, its Documents are also permanently deleted (CASCADE). If the user wants a Document to survive the deletion of its LifeEvent, they must reassign the Document to another event (or ungroup it) before deleting the event.
-57. If a user explicitly deletes a child entity while its parent is still active (e.g., deletes a Document while the Person and LifeEvent are active), that child appears in the trash independently and follows its own 30-day clock.
-58. PersonRelationship uses hard-delete only. Deleted relationships are gone immediately with no trash period.
+49. Case, Person, LifeEvent, Document, and ClaimLine have a `deleted_at` column. A null value means active; a non-null value means trashed. PersonRelationship and FileAttachment have no soft-delete.
+50. All read queries filter `WHERE deleted_at IS NULL`. Trashed entities are excluded from normal results and only appear in the trash view.
+51. Only directly-deleted entities appear in the trash. Children of a trashed entity are hidden implicitly — their own `deleted_at` remains null and they do not appear in the trash independently.
+52. A trashed entity and all its implicitly-hidden children are frozen: no edits, no reassignment, no new children may be added until the parent is restored.
+53. Restoring a trashed entity automatically restores all implicitly-hidden children (they were never independently deleted).
+54. Trashed entities are permanently hard-deleted after 30 days. All descendant entities are permanently deleted via DB-level `ON DELETE CASCADE` foreign keys.
+55. Permanently deleting a Document, directly or through a parent, also deletes its files from object storage.
+56. Permanently deleting a Case, by a user or by the 30-day purge, writes a CaseDeletionRecord in the same transaction. The case's ActivityLog entries are deleted with it.
+57. If a LifeEvent is permanently deleted, its Documents are also permanently deleted (CASCADE). If the user wants a Document to survive the deletion of its LifeEvent, they must reassign the Document to another event (or ungroup it) before deleting the event.
+58. If a user explicitly deletes a child entity while its parent is still active (e.g., deletes a Document while the Person and LifeEvent are active), that child appears in the trash independently and follows its own 30-day clock.
+59. PersonRelationship uses hard-delete only. Deleted relationships are gone immediately with no trash period.
 
 ### Reassignment
 
-59. A LifeEvent may be reassigned to a different Person within the same Case. Cross-case reassignment is not permitted.
-60. A Document may be reassigned to a different LifeEvent within the same Case, including one belonging to a different Person. When the target event belongs to a different Person, `person_id` and `life_event_id` are updated atomically in a single transaction.
-61. A Document's `life_event_id` may be set to null to ungroup it from any event, leaving it associated with its Person only.
-62. Reassignment is not permitted if the entity being moved or its target parent is trashed.
-63. Reassignment is logged as an `updated` action in ActivityLog with the old and new parent ID(s) captured in `changes`.
-64. PersonRelationship graph validation is enforced in the application layer: a Person may have at most 2 parents, and no Person may be both a direct ancestor and a direct descendant of the same Person (no circular relationships).
+60. A LifeEvent may be reassigned to a different Person within the same Case. Cross-case reassignment is not permitted.
+61. A Document may be reassigned to a different LifeEvent within the same Case, including one belonging to a different Person. When the target event belongs to a different Person, `person_id` and `life_event_id` are updated atomically in a single transaction.
+62. A Document's `life_event_id` may be set to null to ungroup it from any event, leaving it associated with its Person only.
+63. Reassignment is not permitted if the entity being moved or its target parent is trashed.
+64. Reassignment is logged as an `updated` action in ActivityLog with the old and new parent ID(s) captured in `changes`.
+65. PersonRelationship graph validation is enforced in the application layer: a Person may have at most 2 parents, and no Person may be both a direct ancestor and a direct descendant of the same Person (no circular relationships).
 
 ---
 

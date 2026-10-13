@@ -190,7 +190,7 @@ Two exceptions:
 
 ## Frontend
 
-- `api/` holds the typed API client. List calls fetch every page, so screens always work with a case's complete data.
+- `api/` holds the typed API client. Lists inside a case arrive complete in one response, so screens always work with a case's full data.
 - Components shared by more than one feature live in `components/`. Anything used by a single feature stays in that feature's folder.
 - Within a feature folder, each form, modal, and section is its own component file. The page file arranges them and holds no form or modal markup of its own. Existing pages that predate this rule are split when they are next changed.
 - Child entities are managed inside their parent's modal, not on separate pages.
