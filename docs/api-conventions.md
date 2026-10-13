@@ -18,13 +18,15 @@ Resources are nested under their owning case.
 /api/v1/cases/:caseId/people/:personId/recorded-details
 /api/v1/cases/:caseId/claim-lines
 /api/v1/cases/:caseId/claim-lines/:claimLineId
+/api/v1/cases/:caseId/applications
+/api/v1/cases/:caseId/applications/:applicationId
+/api/v1/cases/:caseId/applications/:applicationId/export
 /api/v1/cases/:caseId/life-events
 /api/v1/cases/:caseId/life-events/:lifeEventId
 /api/v1/cases/:caseId/documents
 /api/v1/cases/:caseId/documents/:documentId
 /api/v1/cases/:caseId/documents/:documentId/files
 /api/v1/cases/:caseId/documents/:documentId/files/:fileId
-/api/v1/cases/:caseId/exports/application-files
 /api/v1/cases/:caseId/exports/all-files
 /api/v1/cases/:caseId/trash
 
@@ -38,7 +40,9 @@ Resources are nested under their owning case.
 - Files and exports are case-scoped for the same reason. No file is addressable by its ID alone
 - `PersonRelationship` is managed through the people endpoints, not a separate route
 - `DocumentNamedPerson` entries are part of their Document, read and written with it, not a separate route
-- Exports are a sub-resource of cases, not top-level
+- An Application's applicants are part of the Application, read and written with it, not a separate route
+- The Application Files export is a sub-resource of its Application. The All Files export is a sub-resource of the case. Neither is top-level
+- `GET /api/v1/cases` accepts `?status=` (`active`, `on_hold`, `complete`), `?archived=true` to list archived cases instead of current ones, and `?q=` to search by title
 - `DocumentStatus` entries are workspace-global and not nested under a case
 - `GET /api/v1/document-statuses` accepts an optional `?phase=` query parameter to filter by phase (`official_copy`, `amendment`, `apostille`, `translation`, `any`). Omitting it returns all statuses.
 - `GET /api/v1/cases/:caseId/trash` lists the trashed entities within a case. `GET /api/v1/trash` lists trashed cases.
@@ -52,6 +56,7 @@ An operation that is not a plain create, read, update, or delete is a sub-path o
 |---|---|
 | Restore from trash | `POST /api/v1/cases/:caseId/<resource>/:id/restore` (and `POST /api/v1/cases/:caseId/restore`) |
 | Permanently delete | `DELETE /api/v1/cases/:caseId/<resource>/:id/permanent` (and `DELETE /api/v1/cases/:caseId/permanent`) |
+| Archive or unarchive a case | `POST /api/v1/cases/:caseId/archive`, `POST /api/v1/cases/:caseId/unarchive` |
 | Promote a flat-field spouse to a Person | `POST /api/v1/cases/:caseId/life-events/:lifeEventId/promote-spouse` |
 | Make an earlier submission file current | `POST /api/v1/cases/:caseId/documents/:documentId/files/:fileId/restore` |
 
@@ -125,6 +130,8 @@ Responses include every derived value the interface needs. Clients do not recomp
   }
   ```
 
+- Every Document also carries, for each phase, the date it entered its current status; the age of its current copy, when the issue date allows; and the number of copies required.
+- Every Application carries its Documents, in packet order, and its status with the number ready out of the total.
 - Every Case carries `progress`, in both the case list and the case detail: the count of its Documents in each readiness status.
 
   ```json
@@ -154,14 +161,15 @@ Validation errors also list each field at fault, with a message a user can act o
     "code": "invalid_input",
     "message": "Some fields are invalid",
     "fields": [
-      { "field": "event_date", "message": "Enter a year, a year and month, or a full date" },
-      { "field": "title", "message": "Title is required" }
+      { "field": "event_date", "code": "invalid_partial_date", "message": "Enter a year, a year and month, or a full date" },
+      { "field": "title", "code": "required", "message": "Title is required" }
     ]
   }
 }
 ```
 
 - `message` is always written for the user, not the developer.
+- Each entry in `fields` carries a stable `code` alongside its message, so the wording can later be translated without changing the API.
 - `fields` is present whenever the problem can be tied to specific fields. A request with several invalid fields reports all of them, not only the first.
 - The frontend shows field messages beside the fields and the top-level message otherwise. It does not replace a server message with a generic one.
 
@@ -186,7 +194,10 @@ Validation errors also list each field at fault, with a message a user can act o
 
 - Uploads use multipart form data and go through the backend. Presigned URLs are not used.
 - Downloads are streamed through the backend from a case-scoped URL.
-- Size and content-type limits are set in Milestone 3.
+- A file can be requested for viewing or for download. For viewing, it is served so that the browser displays it in a tab.
+- A submission file must be a PDF; a supporting file must be a PDF or an image. The server checks the file's content, not only its name, and refuses anything else with `invalid_input`.
+- The maximum upload size is a deployment setting. A file over the limit is refused with `invalid_input` and a message stating the limit.
+- Exports are ZIP files. The names of the files inside are generated by the server.
 
 ## Dates
 

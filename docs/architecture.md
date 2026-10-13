@@ -35,6 +35,7 @@ doc-tracker/
 │   │   │   ├── cases/
 │   │   │   ├── people/
 │   │   │   ├── claim-lines/
+│   │   │   ├── applications/    # (planned)
 │   │   │   ├── life-events/
 │   │   │   ├── documents/
 │   │   │   ├── trash/
@@ -59,6 +60,7 @@ doc-tracker/
 │   │   ├── cases/
 │   │   ├── people/
 │   │   ├── claimlines/
+│   │   ├── applications/        # (planned)
 │   │   ├── lifeevents/
 │   │   ├── documents/
 │   │   ├── trash/
@@ -118,11 +120,12 @@ The structure is consistent regardless of module size. This makes AI-assisted de
 | `cases` | Case lifecycle and status; whether a Case is active | |
 | `people` | Person records, PersonRelationship; whether a Person is active | |
 | `claimlines` | ClaimLine records and status | |
+| `applications` *(planned)* | Application records and their applicants; deriving an Application's Documents from each applicant's path to the root ancestor, its status, and copies required | Uses `people`, `cases`, and `documents` through interfaces |
 | `lifeevents` | LifeEvent records, including shared marriages; whether a LifeEvent is active | |
 | `documents` | Document records, DocumentNamedPerson, FileAttachment, readiness; also hosts `GET /api/v1/document-statuses` until custom status management warrants its own package | Uses `storage` through an interface *(planned)* |
 | `trash` | Trash listing, the 30-day purge, CaseDeletionRecord; coordinates restore and permanent delete | Owns no entity tables. Asks each owning module to restore or delete its own records |
 | `storage` *(planned)* | File upload/download, object storage abstraction | Imports nothing internal |
-| `exports` *(planned)* | ZIP assembly, export summary, export downloads | Uses `documents` and `storage` through interfaces |
+| `exports` *(planned)* | ZIP assembly, generated file names, the manifest, export downloads | Uses `applications`, `documents`, and `storage` through interfaces |
 
 ## Module Boundaries
 
@@ -156,7 +159,7 @@ platform     ← imported by every module; imports nothing internal
 users        ← imports nothing internal
 auth         ← imports users
 activitylog  ← imports nothing internal
-cases, people, claimlines, lifeevents, documents, trash
+cases, people, claimlines, lifeevents, documents, trash, applications (planned)
              ← import auth (current user) and activitylog
 storage      ← imports nothing internal                      (planned)
 documents    ← additionally imports storage's interface      (planned)
