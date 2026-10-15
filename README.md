@@ -4,10 +4,9 @@ A case management tool for citizenship-by-descent document collection. It is bui
 
 ## Status
 
-The app is a working case manager but not yet feature-complete.
-
-- **Done:** login, cases, people and parent-child relationships, life events, documents with per-phase statuses, claim lines, and a trash with restore.
-- **Not yet built:** file upload and ZIP export of a case's files.
+- **Built:** login, cases, people and family links, life events, documents with per-phase statuses, claim lines, and a trash with restore.
+- **In progress:** the MVP, covering data integrity, flexible dates, readiness tracking, applications, and a production deployment.
+- **After the MVP:** file upload and ZIP exports.
 
 See [docs/milestones.md](docs/milestones.md) for the detailed checklist.
 
