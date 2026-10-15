@@ -467,24 +467,27 @@ A **supporting** file is anything else worth keeping with the document, such as 
 ## MoSCoW
 
 ### Must (MVP)
-- User, Case, ClaimLine, Application, ApplicationApplicant, Person, PersonRelationship, LifeEvent, Document, DocumentNamedPerson, FileAttachment, DocumentStatus, ActivityLog, CaseDeletionRecord
+- User, Case, ClaimLine, Application, ApplicationApplicant, Person, PersonRelationship, LifeEvent, Document, DocumentNamedPerson, DocumentStatus, ActivityLog, CaseDeletionRecord
 - Multi-user authentication (shared access, all users see all data, no per-user permissions); session-based
 - Activity log data capture on all write operations, in the same transaction as the change (display deferred)
-- File upload to S3-compatible storage via multipart form, server-side encryption at rest: a versioned PDF submission file per document, plus supporting files; a scan can be opened in the browser
+- Record versions, so concurrent edits are refused rather than silently overwritten
 - Partial and qualified dates, and recorded ages
 - Other people named in a document, and a per-person comparison of recorded details
-- Marriages between two people in a case (one shared marriage event; promote a spouse to a person)
+- Marriages between two people in a case (one shared marriage event)
 - Case statuses (active, on hold, complete), archiving, and case notes
 - One pursued claim line per case
 - Applications: applicants grouped by venue, with derived documents, status, and copies required
 - Case list with status filter and title search
 - Case overview (ClaimLine status summary + LifeEvents without documents)
-- Document readiness and case progress (summary counts and outstanding list)
+- Document readiness and case progress (summary counts and outstanding list by stage)
 - Request tracking on each phase: date entered, time waiting, reference number
 - The "for submission" flag on documents
+- Production deployment readiness (see the Deployable milestone in `milestones.md`)
+
+### Should (first releases after the MVP)
+- FileAttachment: file upload to S3-compatible storage via multipart form, server-side encryption at rest; a versioned PDF submission file per document, plus supporting files; a single file can be opened in the browser or downloaded
 - Application Files export per application (ZIP of ready documents' current submission files under generated names, with a manifest of every document: included or left out, and why)
 - All Files export per case (ZIP)
-- Production deployment readiness (see Milestone 4 in `milestones.md`)
 
 ### Could (post-MVP)
 - Activity feed UI (per-case feed; per-entity feed)
@@ -507,6 +510,10 @@ A **supporting** file is anything else worth keeping with the document, such as 
 - Two-factor login
 - Case list filtering beyond status and title
 - User-managed document types
+- Grouping the outstanding list by person
+- An action to promote a flat-field spouse to a Person in one step
+- Restoring an earlier version of a submission file
+- The life event form offering to add the event's expected document in the same step
 - Documents attached to an application rather than a person (powers of attorney, application forms), and an Attorney File export that includes them
 - A link from amended documents to the court order that amended them
 - Document age limits per application, with warnings (a planned submission date, and documents marked as needing a recent copy)

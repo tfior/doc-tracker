@@ -10,7 +10,7 @@
 | Data fetching | TanStack Query | Server state, caching, loading/error handling |
 | Backend | Go | Modular monolith; standard library HTTP server |
 | Database | PostgreSQL 18 | Explicit SQL, no heavy ORM |
-| File storage | S3-compatible | Local development store to be chosen in Milestone 3; any S3-compatible service in production |
+| File storage | S3-compatible | Local development store to be chosen in Milestone 8 (Files); any S3-compatible service in production |
 | Migrations | golang-migrate | SQL files only, no down migrations |
 | Auth | Session-based | Multi-user with shared access; users created via CLI; no user-management UI for MVP |
 | Dev environment | Docker Compose | |
