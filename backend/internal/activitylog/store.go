@@ -9,6 +9,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/tfior/doc-tracker/platform"
 )
 
 type Store interface {
@@ -33,7 +35,7 @@ func (s *store) Insert(ctx context.Context, p InsertParams) error {
 		changesJSON = string(b)
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		INSERT INTO activity_logs
 			(case_id, user_id, action, entity_type, entity_id, entity_name, changes)
 		VALUES ($1, $2, $3::activity_action, $4::activity_entity_type, $5::uuid, $6, $7::jsonb)`,

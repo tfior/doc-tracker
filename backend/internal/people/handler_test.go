@@ -5,8 +5,7 @@
 package people_test
 
 import (
-	"bytes"
-	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,30 +19,29 @@ import (
 )
 
 type testEnv struct {
-	svc      *people.Service
-	casesSvc *cases.Service
-	mux      *http.ServeMux
+	db *sql.DB
+	c  *testhelpers.AppClient
 }
 
+// newTestEnv returns an environment that sends requests to the fully assembled
+// application, behind the real authentication middleware, as a logged-in user.
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db := testhelpers.OpenTestDB(t)
 	testhelpers.TruncateCases(t, db)
+	testhelpers.TruncateUsers(t, db)
+	return &testEnv{db: db, c: testhelpers.NewAppClient(t, db)}
+}
 
-	casesSvc := cases.NewService(cases.NewStore(db))
-	peopleSvc := people.NewService(people.NewStore(db))
-
-	mux := http.NewServeMux()
-	people.NewHandler(peopleSvc, nil).RegisterRoutes(mux)
-
-	return &testEnv{svc: peopleSvc, casesSvc: casesSvc, mux: mux}
+func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
+	return e.c.Do(method, path, body)
 }
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
 	t.Helper()
-	c, err := e.casesSvc.CreateCase(context.Background(), "Test Case")
-	require.NoError(t, err)
-	return c
+	var c cases.Case
+	e.c.MustCreateInto(t, "/api/v1/cases", map[string]any{"title": "Test Case"}, &c)
+	return &c
 }
 
 // createPerson creates a person via the HTTP endpoint and returns the decoded Person.
@@ -58,20 +56,6 @@ func (e *testEnv) createPerson(t *testing.T, caseID, firstName, lastName string)
 	var p people.Person
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&p))
 	return p
-}
-
-func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	var buf bytes.Buffer
-	if body != nil {
-		_ = json.NewEncoder(&buf).Encode(body)
-	}
-	req := httptest.NewRequest(method, path, &buf)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	e.mux.ServeHTTP(rec, req)
-	return rec
 }
 
 // ---------------------------------------------------------------------------

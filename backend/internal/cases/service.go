@@ -4,14 +4,22 @@
 
 package cases
 
-import "context"
+import (
+	"context"
+	"database/sql"
+
+	"github.com/tfior/doc-tracker/internal/activitylog"
+	"github.com/tfior/doc-tracker/platform"
+)
 
 type Service struct {
 	store Store
+	db    *sql.DB
+	log   *activitylog.Service
 }
 
-func NewService(store Store) *Service {
-	return &Service{store: store}
+func NewService(store Store, db *sql.DB, log *activitylog.Service) *Service {
+	return &Service{store: store, db: db, log: log}
 }
 
 func (s *Service) ListCases(ctx context.Context, page, perPage int) ([]Case, int, error) {
@@ -23,13 +31,59 @@ func (s *Service) GetCase(ctx context.Context, caseID string) (*CaseDetail, erro
 }
 
 func (s *Service) CreateCase(ctx context.Context, title string) (*Case, error) {
-	return s.store.CreateCase(ctx, title)
+	var c *Case
+	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		var err error
+		if c, err = s.store.CreateCase(ctx, title); err != nil {
+			return err
+		}
+		return s.log.Insert(ctx, activitylog.InsertParams{
+			CaseID: c.ID, Action: "created", EntityType: "case",
+			EntityID: c.ID, EntityName: c.Title,
+		})
+	})
+	return c, err
 }
 
 func (s *Service) UpdateCase(ctx context.Context, caseID string, title *string, status *string) (*Case, error) {
-	return s.store.UpdateCase(ctx, caseID, title, status)
+	var c *Case
+	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		var err error
+		if c, err = s.store.UpdateCase(ctx, caseID, title, status); err != nil {
+			return err
+		}
+		changes := activitylog.AddString(nil, "title", title)
+		changes = activitylog.AddString(changes, "status", status)
+		return s.log.Insert(ctx, activitylog.InsertParams{
+			CaseID: c.ID, Action: "updated", EntityType: "case",
+			EntityID: c.ID, EntityName: c.Title, Changes: changes,
+		})
+	})
+	return c, err
 }
 
 func (s *Service) DeleteCase(ctx context.Context, caseID string) error {
-	return s.store.DeleteCase(ctx, caseID)
+	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		if err := s.store.DeleteCase(ctx, caseID); err != nil {
+			return err
+		}
+		return s.log.Insert(ctx, activitylog.InsertParams{
+			CaseID: caseID, Action: "deleted", EntityType: "case",
+			EntityID: caseID, EntityName: caseID,
+		})
+	})
+}
+
+// Restore takes a case out of the trash. Called by the trash module.
+func (s *Service) Restore(ctx context.Context, caseID string) error {
+	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		return s.store.RestoreCase(ctx, caseID)
+	})
+}
+
+// PermanentDelete deletes a trashed case and everything in it. Called by the trash module.
+func (s *Service) PermanentDelete(ctx context.Context, caseID string) error {
+	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		return s.store.PermanentDeleteCase(ctx, caseID)
+	})
 }

@@ -5,8 +5,7 @@
 package cases_test
 
 import (
-	"bytes"
-	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,43 +18,34 @@ import (
 )
 
 type testEnv struct {
-	svc *cases.Service
-	mux *http.ServeMux
+	db *sql.DB
+	c  *testhelpers.AppClient
 }
 
+// newTestEnv returns an environment that sends requests to the fully assembled
+// application, behind the real authentication middleware, as a logged-in user.
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db := testhelpers.OpenTestDB(t)
 	testhelpers.TruncateCases(t, db)
+	testhelpers.TruncateUsers(t, db)
+	return &testEnv{db: db, c: testhelpers.NewAppClient(t, db)}
+}
 
-	store := cases.NewStore(db)
-	svc := cases.NewService(store)
-
-	mux := http.NewServeMux()
-	cases.NewHandler(svc, nil).RegisterRoutes(mux)
-
-	return &testEnv{svc: svc, mux: mux}
+func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
+	return e.c.Do(method, path, body)
 }
 
 func (e *testEnv) createCase(t *testing.T, title string) *cases.Case {
 	t.Helper()
-	c, err := e.svc.CreateCase(context.Background(), title)
-	require.NoError(t, err)
-	return c
+	var c cases.Case
+	e.c.MustCreateInto(t, "/api/v1/cases", map[string]any{"title": title}, &c)
+	return &c
 }
 
-func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	var buf bytes.Buffer
-	if body != nil {
-		_ = json.NewEncoder(&buf).Encode(body)
-	}
-	req := httptest.NewRequest(method, path, &buf)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	e.mux.ServeHTTP(rec, req)
-	return rec
+func (e *testEnv) deleteCase(t *testing.T, caseID string) {
+	t.Helper()
+	e.c.MustDelete(t, "/api/v1/cases/"+caseID)
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +168,7 @@ func TestUpdateCase_NotFound(t *testing.T) {
 func TestUpdateCase_OnSoftDeletedCase(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t, "About to be deleted")
-	require.NoError(t, env.svc.DeleteCase(context.Background(), c.ID))
+	env.deleteCase(t, c.ID)
 
 	rec := env.do("PATCH", "/api/v1/cases/"+c.ID, map[string]string{"title": "New"})
 
@@ -211,7 +201,7 @@ func TestDeleteCase_NotFound(t *testing.T) {
 func TestDeleteCase_AlreadyDeleted(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t, "Double Delete")
-	require.NoError(t, env.svc.DeleteCase(context.Background(), c.ID))
+	env.deleteCase(t, c.ID)
 
 	rec := env.do("DELETE", "/api/v1/cases/"+c.ID, nil)
 
@@ -226,7 +216,7 @@ func TestListCases_ExcludesDeleted(t *testing.T) {
 	env := newTestEnv(t)
 	env.createCase(t, "Visible")
 	hidden := env.createCase(t, "Hidden")
-	require.NoError(t, env.svc.DeleteCase(context.Background(), hidden.ID))
+	env.deleteCase(t, hidden.ID)
 
 	rec := env.do("GET", "/api/v1/cases", nil)
 
@@ -244,7 +234,7 @@ func TestListCases_ExcludesDeleted(t *testing.T) {
 func TestGetCase_OnSoftDeletedCase(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t, "Deleted Case")
-	require.NoError(t, env.svc.DeleteCase(context.Background(), c.ID))
+	env.deleteCase(t, c.ID)
 
 	rec := env.do("GET", "/api/v1/cases/"+c.ID, nil)
 
