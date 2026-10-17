@@ -9,27 +9,15 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tfior/doc-tracker/internal/activitylog"
-	"github.com/tfior/doc-tracker/internal/auth"
 	"github.com/tfior/doc-tracker/platform"
 )
 
 type Handler struct {
-	svc    *Service
-	actlog *activitylog.Service // nil disables logging (e.g. in tests)
+	svc *Service
 }
 
-func NewHandler(svc *Service, actlog *activitylog.Service) *Handler {
-	return &Handler{svc: svc, actlog: actlog}
-}
-
-func (h *Handler) log(r *http.Request, p activitylog.InsertParams) {
-	if h.actlog == nil {
-		return
-	}
-	userID, _ := auth.UserIDFromContext(r.Context())
-	p.UserID = userID
-	_ = h.actlog.Insert(r.Context(), p)
+func NewHandler(svc *Service) *Handler {
+	return &Handler{svc: svc}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -95,10 +83,6 @@ func (h *Handler) createCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log(r, activitylog.InsertParams{
-		CaseID: c.ID, Action: "created", EntityType: "case",
-		EntityID: c.ID, EntityName: c.Title,
-	})
 	platform.JSON(w, http.StatusCreated, c)
 }
 
@@ -136,17 +120,6 @@ func (h *Handler) updateCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var changes []activitylog.FieldChange
-	if body.Title != nil {
-		changes = append(changes, activitylog.FieldChange{Field: "title", To: *body.Title})
-	}
-	if body.Status != nil {
-		changes = append(changes, activitylog.FieldChange{Field: "status", To: *body.Status})
-	}
-	h.log(r, activitylog.InsertParams{
-		CaseID: c.ID, Action: "updated", EntityType: "case",
-		EntityID: c.ID, EntityName: c.Title, Changes: changes,
-	})
 	platform.JSON(w, http.StatusOK, c)
 }
 
@@ -163,9 +136,5 @@ func (h *Handler) deleteCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log(r, activitylog.InsertParams{
-		CaseID: caseID, Action: "deleted", EntityType: "case",
-		EntityID: caseID, EntityName: caseID,
-	})
 	w.WriteHeader(http.StatusNoContent)
 }

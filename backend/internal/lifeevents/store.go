@@ -9,9 +9,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/tfior/doc-tracker/platform"
 )
 
-var ErrNotFound = errors.New("life event not found")
+var ErrNotFound = fmt.Errorf("life event %w", platform.ErrNotFound)
 
 type Store interface {
 	ListLifeEvents(ctx context.Context, caseID string, page, perPage int) ([]LifeEvent, int, error)
@@ -19,6 +21,9 @@ type Store interface {
 	UpdateLifeEvent(ctx context.Context, caseID, eventID string, input UpdateLifeEventInput) (*LifeEvent, error)
 	DeleteLifeEvent(ctx context.Context, caseID, eventID string) error
 	ReassignLifeEvent(ctx context.Context, caseID, eventID, personID string) (*LifeEvent, error)
+	RequireActive(ctx context.Context, caseID, eventID string) error
+	Restore(ctx context.Context, caseID, id string) error
+	PermanentDelete(ctx context.Context, caseID, id string) error
 }
 
 type store struct {
@@ -31,14 +36,14 @@ func NewStore(db *sql.DB) Store {
 
 func (s *store) ListLifeEvents(ctx context.Context, caseID string, page, perPage int) ([]LifeEvent, int, error) {
 	var total int
-	if err := s.db.QueryRowContext(ctx,
+	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM life_events WHERE case_id = $1 AND deleted_at IS NULL`, caseID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count life events: %w", err)
 	}
 
 	offset := (page - 1) * perPage
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT
 			le.id::text, le.case_id::text, le.person_id::text,
 			le.event_type::text,
@@ -75,12 +80,9 @@ func (s *store) ListLifeEvents(ctx context.Context, caseID string, page, perPage
 }
 
 func (s *store) CreateLifeEvent(ctx context.Context, caseID, personID, eventType string, input UpdateLifeEventInput) (*LifeEvent, error) {
-	if err := s.requirePersonInCase(ctx, caseID, personID); err != nil {
-		return nil, err
-	}
 
 	var id string
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		INSERT INTO life_events
 			(case_id, person_id, event_type, event_date, event_place,
 			 spouse_name, spouse_birth_date, spouse_birth_place, notes)
@@ -102,7 +104,7 @@ func (s *store) CreateLifeEvent(ctx context.Context, caseID, personID, eventType
 }
 
 func (s *store) UpdateLifeEvent(ctx context.Context, caseID, eventID string, input UpdateLifeEventInput) (*LifeEvent, error) {
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE life_events SET
 			event_type        = COALESCE($3::life_event_type, event_type),
 			event_date        = CASE WHEN $4  THEN $5::date  ELSE event_date        END,
@@ -137,7 +139,7 @@ func (s *store) UpdateLifeEvent(ctx context.Context, caseID, eventID string, inp
 }
 
 func (s *store) DeleteLifeEvent(ctx context.Context, caseID, eventID string) error {
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE life_events SET deleted_at = NOW()
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		eventID, caseID,
@@ -156,11 +158,8 @@ func (s *store) DeleteLifeEvent(ctx context.Context, caseID, eventID string) err
 }
 
 func (s *store) ReassignLifeEvent(ctx context.Context, caseID, eventID, personID string) (*LifeEvent, error) {
-	if err := s.requirePersonInCase(ctx, caseID, personID); err != nil {
-		return nil, err
-	}
 
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE life_events SET person_id = $3, updated_at = NOW()
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		eventID, caseID, personID,
@@ -182,7 +181,7 @@ func (s *store) ReassignLifeEvent(ctx context.Context, caseID, eventID, personID
 // getLifeEvent fetches a single non-deleted life event by ID and case, including
 // the has_documents flag.
 func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*LifeEvent, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT
 			le.id::text, le.case_id::text, le.person_id::text,
 			le.event_type::text,
@@ -205,22 +204,6 @@ func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*Life
 		return nil, fmt.Errorf("get life event: %w", err)
 	}
 	return le, nil
-}
-
-// requirePersonInCase returns ErrNotFound if the person does not exist or does
-// not belong to the given case.
-func (s *store) requirePersonInCase(ctx context.Context, caseID, personID string) error {
-	var count int
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM people WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
-		personID, caseID,
-	).Scan(&count); err != nil {
-		return fmt.Errorf("verify person: %w", err)
-	}
-	if count == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 // scanLifeEvent uses the provided scan function (from either *sql.Row or *sql.Rows)
@@ -260,6 +243,41 @@ func scanLifeEvent(scan func(...any) error) (*LifeEvent, error) {
 	return &le, nil
 }
 
-func nullToSQL(f NullableField) sql.NullString {
+func nullToSQL(f platform.NullString) sql.NullString {
 	return sql.NullString{String: f.Value, Valid: f.Valid}
+}
+
+// RequireActive returns ErrNotFound unless the life event exists in the case and is not trashed.
+func (s *store) RequireActive(ctx context.Context, caseID, eventID string) error {
+	var count int
+	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM life_events WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
+		eventID, caseID,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("verify life event: %w", err)
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *store) Restore(ctx context.Context, caseID, id string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`UPDATE life_events SET deleted_at = NULL WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		id, caseID)
+	if err != nil {
+		return fmt.Errorf("restore life event: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`DELETE FROM life_events WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		id, caseID)
+	if err != nil {
+		return fmt.Errorf("permanent delete life event: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
 }

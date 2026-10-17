@@ -5,8 +5,7 @@
 package trash_test
 
 import (
-	"bytes"
-	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,39 +23,22 @@ import (
 )
 
 type testEnv struct {
-	casesSvc  *cases.Service
-	peopleSvc *people.Service
-	leSvc     *lifeevents.Service
-	docSvc    *documents.Service
-	clSvc     *claimlines.Service
-	trashSvc  *trash.Service
-	mux       *http.ServeMux
+	db *sql.DB
+	c  *testhelpers.AppClient
 }
 
+// newTestEnv returns an environment that sends requests to the fully assembled
+// application, behind the real authentication middleware, as a logged-in user.
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db := testhelpers.OpenTestDB(t)
 	testhelpers.TruncateCases(t, db)
+	testhelpers.TruncateUsers(t, db)
+	return &testEnv{db: db, c: testhelpers.NewAppClient(t, db)}
+}
 
-	casesSvc := cases.NewService(cases.NewStore(db))
-	peopleSvc := people.NewService(people.NewStore(db))
-	leSvc := lifeevents.NewService(lifeevents.NewStore(db))
-	docSvc := documents.NewService(documents.NewStore(db))
-	clSvc := claimlines.NewService(claimlines.NewStore(db))
-	trashSvc := trash.NewService(trash.NewStore(db))
-
-	mux := http.NewServeMux()
-	cases.NewHandler(casesSvc, nil).RegisterRoutes(mux)
-	people.NewHandler(peopleSvc, nil).RegisterRoutes(mux)
-	lifeevents.NewHandler(leSvc, nil).RegisterRoutes(mux)
-	documents.NewHandler(docSvc, nil).RegisterRoutes(mux)
-	claimlines.NewHandler(clSvc, nil).RegisterRoutes(mux)
-	trash.NewHandler(trashSvc).RegisterRoutes(mux)
-
-	return &testEnv{
-		casesSvc: casesSvc, peopleSvc: peopleSvc, leSvc: leSvc,
-		docSvc: docSvc, clSvc: clSvc, trashSvc: trashSvc, mux: mux,
-	}
+func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
+	return e.c.Do(method, path, body)
 }
 
 // ---------------------------------------------------------------------------
@@ -65,82 +47,74 @@ func newTestEnv(t *testing.T) *testEnv {
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
 	t.Helper()
-	c, err := e.casesSvc.CreateCase(context.Background(), "Test Case")
-	require.NoError(t, err)
-	return c
+	var c cases.Case
+	e.c.MustCreateInto(t, "/api/v1/cases", map[string]any{"title": "Test Case"}, &c)
+	return &c
 }
 
 func (e *testEnv) createPerson(t *testing.T, caseID string) *people.Person {
 	t.Helper()
-	p, err := e.peopleSvc.CreatePerson(context.Background(), caseID, "Giuseppe", "Rossi", people.UpdatePersonInput{})
-	require.NoError(t, err)
-	return p
+	var p people.Person
+	e.c.MustCreateInto(t, "/api/v1/cases/"+caseID+"/people",
+		map[string]any{"first_name": "Giuseppe", "last_name": "Rossi"}, &p)
+	return &p
 }
 
 func (e *testEnv) createLifeEvent(t *testing.T, caseID, personID string) *lifeevents.LifeEvent {
 	t.Helper()
-	le, err := e.leSvc.CreateLifeEvent(context.Background(), caseID, personID, "birth", lifeevents.UpdateLifeEventInput{})
-	require.NoError(t, err)
-	return le
+	var le lifeevents.LifeEvent
+	e.c.MustCreateInto(t, "/api/v1/cases/"+caseID+"/life-events",
+		map[string]any{"person_id": personID, "event_type": "birth"}, &le)
+	return &le
 }
 
 func (e *testEnv) createDocument(t *testing.T, caseID, personID string) *documents.Document {
 	t.Helper()
-	d, err := e.docSvc.CreateDocument(context.Background(), caseID, personID, "birth_certificate", "Test Doc", documents.UpdateDocumentInput{})
-	require.NoError(t, err)
-	return d
+	var d documents.Document
+	e.c.MustCreateInto(t, "/api/v1/cases/"+caseID+"/documents",
+		map[string]any{"person_id": personID, "document_type": "birth_certificate", "title": "Test Doc"}, &d)
+	return &d
 }
 
 func (e *testEnv) createClaimLine(t *testing.T, caseID, personID string) *claimlines.ClaimLine {
 	t.Helper()
-	cl, err := e.clSvc.CreateClaimLine(context.Background(), caseID, personID, "not_yet_researched", claimlines.NullableField{})
-	require.NoError(t, err)
-	return cl
+	var cl claimlines.ClaimLine
+	e.c.MustCreateInto(t, "/api/v1/cases/"+caseID+"/claim-lines",
+		map[string]any{"root_person_id": personID}, &cl)
+	return &cl
 }
 
 func (e *testEnv) deleteCase(t *testing.T, caseID string) {
 	t.Helper()
-	require.NoError(t, e.casesSvc.DeleteCase(context.Background(), caseID))
+	e.c.MustDelete(t, "/api/v1/cases/"+caseID)
 }
 
 func (e *testEnv) deletePerson(t *testing.T, caseID, personID string) {
 	t.Helper()
-	require.NoError(t, e.peopleSvc.DeletePerson(context.Background(), caseID, personID))
+	e.c.MustDelete(t, "/api/v1/cases/"+caseID+"/people/"+personID)
 }
 
 func (e *testEnv) deleteLifeEvent(t *testing.T, caseID, eventID string) {
 	t.Helper()
-	require.NoError(t, e.leSvc.DeleteLifeEvent(context.Background(), caseID, eventID))
+	e.c.MustDelete(t, "/api/v1/cases/"+caseID+"/life-events/"+eventID)
 }
 
 func (e *testEnv) deleteDocument(t *testing.T, caseID, docID string) {
 	t.Helper()
-	require.NoError(t, e.docSvc.DeleteDocument(context.Background(), caseID, docID))
+	e.c.MustDelete(t, "/api/v1/cases/"+caseID+"/documents/"+docID)
 }
 
 func (e *testEnv) deleteClaimLine(t *testing.T, caseID, lineID string) {
 	t.Helper()
-	require.NoError(t, e.clSvc.DeleteClaimLine(context.Background(), caseID, lineID))
-}
-
-func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	var buf bytes.Buffer
-	if body != nil {
-		_ = json.NewEncoder(&buf).Encode(body)
-	}
-	req := httptest.NewRequest(method, path, &buf)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	e.mux.ServeHTTP(rec, req)
-	return rec
+	e.c.MustDelete(t, "/api/v1/cases/"+caseID+"/claim-lines/"+lineID)
 }
 
 func assertNotFoundBody(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
 	var body struct {
-		Error struct{ Code string `json:"code"` } `json:"error"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
 	}
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
 	assert.Equal(t, "not_found", body.Error.Code)
@@ -269,7 +243,9 @@ func TestRestoreLifeEvent_Valid(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/life-events", nil)
-	var list struct{ Total int `json:"total"` }
+	var list struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&list))
 	assert.Equal(t, 1, list.Total)
 }
@@ -285,7 +261,9 @@ func TestRestoreDocument_Valid(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/documents", nil)
-	var list struct{ Total int `json:"total"` }
+	var list struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&list))
 	assert.Equal(t, 1, list.Total)
 }
@@ -301,7 +279,9 @@ func TestRestoreClaimLine_Valid(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/claim-lines", nil)
-	var list struct{ Total int `json:"total"` }
+	var list struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&list))
 	assert.Equal(t, 1, list.Total)
 }
@@ -339,12 +319,16 @@ func TestPermanentDeletePerson_CascadesToChildren(t *testing.T) {
 
 	// Life events and documents are also gone (FK cascade), not just in trash.
 	leRec := env.do("GET", "/api/v1/cases/"+c.ID+"/life-events", nil)
-	var leList struct{ Total int `json:"total"` }
+	var leList struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(leRec.Body).Decode(&leList))
 	assert.Equal(t, 0, leList.Total)
 
 	docRec := env.do("GET", "/api/v1/cases/"+c.ID+"/documents", nil)
-	var docList struct{ Total int `json:"total"` }
+	var docList struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(docRec.Body).Decode(&docList))
 	assert.Equal(t, 0, docList.Total)
 }
@@ -504,7 +488,9 @@ func TestRestoreCase_Valid(t *testing.T) {
 
 	// Case reappears in list.
 	listRec := env.do("GET", "/api/v1/cases", nil)
-	var list struct{ Total int `json:"total"` }
+	var list struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&list))
 	assert.Equal(t, 1, list.Total)
 }
@@ -531,7 +517,9 @@ func TestPermanentDeleteCase_Valid(t *testing.T) {
 
 	// Case and all children are gone.
 	listRec := env.do("GET", "/api/v1/cases", nil)
-	var list struct{ Total int `json:"total"` }
+	var list struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&list))
 	assert.Equal(t, 0, list.Total)
 

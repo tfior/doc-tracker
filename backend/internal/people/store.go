@@ -11,10 +11,11 @@ import (
 	"fmt"
 
 	"github.com/lib/pq"
+	"github.com/tfior/doc-tracker/platform"
 )
 
 var (
-	ErrNotFound = errors.New("person not found")
+	ErrNotFound = fmt.Errorf("person %w", platform.ErrNotFound)
 	ErrConflict = errors.New("conflict")
 )
 
@@ -30,6 +31,9 @@ type Store interface {
 	DeletePerson(ctx context.Context, caseID, personID string) error
 	AddParent(ctx context.Context, caseID, personID, parentID string) (*Relationship, error)
 	RemoveParent(ctx context.Context, caseID, personID, parentID string) error
+	RequireActive(ctx context.Context, caseID, personID string) error
+	Restore(ctx context.Context, caseID, id string) error
+	PermanentDelete(ctx context.Context, caseID, id string) error
 }
 
 type store struct {
@@ -42,14 +46,14 @@ func NewStore(db *sql.DB) Store {
 
 func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int) ([]Person, int, error) {
 	var total int
-	if err := s.db.QueryRowContext(ctx,
+	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM people WHERE case_id = $1 AND deleted_at IS NULL`, caseID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count people: %w", err)
 	}
 
 	offset := (page - 1) * perPage
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT
 			id::text, case_id::text,
 			first_name, last_name,
@@ -95,7 +99,7 @@ func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int
 
 func (s *store) CreatePerson(ctx context.Context, caseID, firstName, lastName string, input UpdatePersonInput) (*Person, error) {
 	var id string
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		INSERT INTO people (case_id, first_name, last_name, birth_date, birth_place, death_date, notes)
 		VALUES ($1, $2, $3, $4::date, $5, $6::date, $7)
 		RETURNING id::text`,
@@ -115,7 +119,7 @@ func (s *store) CreatePerson(ctx context.Context, caseID, firstName, lastName st
 }
 
 func (s *store) UpdatePerson(ctx context.Context, caseID, personID string, input UpdatePersonInput) (*Person, error) {
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE people SET
 			first_name  = COALESCE($3, first_name),
 			last_name   = COALESCE($4, last_name),
@@ -151,7 +155,7 @@ func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person
 	var birthDate, birthPlace, deathDate, notes sql.NullString
 	var parentIDs pq.StringArray
 
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT
 			id::text, case_id::text,
 			first_name, last_name,
@@ -182,7 +186,7 @@ func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person
 }
 
 func (s *store) DeletePerson(ctx context.Context, caseID, personID string) error {
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE people SET deleted_at = NOW()
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		personID, caseID,
@@ -201,24 +205,9 @@ func (s *store) DeletePerson(ctx context.Context, caseID, personID string) error
 }
 
 func (s *store) AddParent(ctx context.Context, caseID, personID, parentID string) (*Relationship, error) {
-	// Verify both person and parent exist and belong to the case.
-	var count int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM people
-		WHERE id = ANY($1::uuid[]) AND case_id = $2 AND deleted_at IS NULL`,
-		pq.Array([]string{personID, parentID}), caseID,
-	).Scan(&count); err != nil {
-		return nil, fmt.Errorf("verify people: %w", err)
-	}
-	// personID and parentID are distinct (validated before this call), so we
-	// expect exactly 2 rows if both belong to the case.
-	if count < 2 {
-		return nil, ErrNotFound
-	}
-
 	// Enforce max 2 parents.
 	var parentCount int
-	if err := s.db.QueryRowContext(ctx,
+	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM person_relationships WHERE person_id = $1`,
 		personID,
 	).Scan(&parentCount); err != nil {
@@ -228,7 +217,7 @@ func (s *store) AddParent(ctx context.Context, caseID, personID, parentID string
 		return nil, ErrConflict
 	}
 
-	_, err := s.db.ExecContext(ctx,
+	_, err := platform.Conn(ctx, s.db).ExecContext(ctx,
 		`INSERT INTO person_relationships (person_id, parent_id, case_id) VALUES ($1, $2, $3)`,
 		personID, parentID, caseID,
 	)
@@ -242,7 +231,7 @@ func (s *store) AddParent(ctx context.Context, caseID, personID, parentID string
 }
 
 func (s *store) RemoveParent(ctx context.Context, caseID, personID, parentID string) error {
-	result, err := s.db.ExecContext(ctx,
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
 		`DELETE FROM person_relationships WHERE person_id = $1 AND parent_id = $2 AND case_id = $3`,
 		personID, parentID, caseID,
 	)
@@ -282,11 +271,46 @@ func toStringSlice(a pq.StringArray) []string {
 	return []string(a)
 }
 
-func nullableToSQL(f NullableField) sql.NullString {
+func nullableToSQL(f platform.NullString) sql.NullString {
 	return sql.NullString{String: f.Value, Valid: f.Valid}
 }
 
 func isPGError(err error, code string) bool {
 	var pgErr *pq.Error
 	return errors.As(err, &pgErr) && string(pgErr.Code) == code
+}
+
+// RequireActive returns ErrNotFound unless the person exists in the case and is not trashed.
+func (s *store) RequireActive(ctx context.Context, caseID, personID string) error {
+	var count int
+	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM people WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
+		personID, caseID,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("verify person: %w", err)
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *store) Restore(ctx context.Context, caseID, id string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`UPDATE people SET deleted_at = NULL WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		id, caseID)
+	if err != nil {
+		return fmt.Errorf("restore person: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`DELETE FROM people WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		id, caseID)
+	if err != nil {
+		return fmt.Errorf("permanent delete person: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
 }

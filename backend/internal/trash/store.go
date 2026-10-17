@@ -7,25 +7,14 @@ package trash
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-)
 
-var ErrNotFound = errors.New("not found in trash")
+	"github.com/tfior/doc-tracker/platform"
+)
 
 type Store interface {
 	GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, error)
 	GetGlobalTrash(ctx context.Context) (*GlobalTrash, error)
-	RestoreCase(ctx context.Context, caseID string) error
-	RestorePerson(ctx context.Context, caseID, personID string) error
-	RestoreLifeEvent(ctx context.Context, caseID, eventID string) error
-	RestoreDocument(ctx context.Context, caseID, docID string) error
-	RestoreClaimLine(ctx context.Context, caseID, lineID string) error
-	PermanentDeleteCase(ctx context.Context, caseID string) error
-	PermanentDeletePerson(ctx context.Context, caseID, personID string) error
-	PermanentDeleteLifeEvent(ctx context.Context, caseID, eventID string) error
-	PermanentDeleteDocument(ctx context.Context, caseID, docID string) error
-	PermanentDeleteClaimLine(ctx context.Context, caseID, lineID string) error
 }
 
 type store struct {
@@ -44,7 +33,7 @@ func (s *store) GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, er
 		ClaimLines: []TrashedClaimLine{},
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT id::text, case_id::text, first_name, last_name, created_at, updated_at, deleted_at
 		FROM people WHERE case_id = $1 AND deleted_at IS NOT NULL
 		ORDER BY deleted_at DESC`, caseID)
@@ -63,7 +52,7 @@ func (s *store) GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, er
 		return nil, fmt.Errorf("iterate trashed people: %w", err)
 	}
 
-	leRows, err := s.db.QueryContext(ctx, `
+	leRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT id::text, case_id::text, person_id::text, event_type::text,
 		       event_date::text, created_at, updated_at, deleted_at
 		FROM life_events WHERE case_id = $1 AND deleted_at IS NOT NULL
@@ -87,7 +76,7 @@ func (s *store) GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, er
 		return nil, fmt.Errorf("iterate trashed life events: %w", err)
 	}
 
-	docRows, err := s.db.QueryContext(ctx, `
+	docRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT id::text, case_id::text, person_id::text, document_type::text, title,
 		       created_at, updated_at, deleted_at
 		FROM documents WHERE case_id = $1 AND deleted_at IS NOT NULL
@@ -107,7 +96,7 @@ func (s *store) GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, er
 		return nil, fmt.Errorf("iterate trashed documents: %w", err)
 	}
 
-	clRows, err := s.db.QueryContext(ctx, `
+	clRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT id::text, case_id::text, root_person_id::text, status::text,
 		       created_at, updated_at, deleted_at
 		FROM claim_lines WHERE case_id = $1 AND deleted_at IS NOT NULL
@@ -139,7 +128,7 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 		ClaimLines: []TrashedClaimLine{},
 	}
 
-	caseRows, err := s.db.QueryContext(ctx, `
+	caseRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT id::text, title, status::text, created_at, updated_at, deleted_at
 		FROM cases WHERE deleted_at IS NOT NULL
 		ORDER BY deleted_at DESC`)
@@ -159,7 +148,7 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 	}
 
 	// For entity types: only include entities whose parent case is not trashed.
-	personRows, err := s.db.QueryContext(ctx, `
+	personRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT p.id::text, p.case_id::text, p.first_name, p.last_name,
 		       p.created_at, p.updated_at, p.deleted_at
 		FROM people p
@@ -181,7 +170,7 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 		return nil, fmt.Errorf("iterate trashed people globally: %w", err)
 	}
 
-	leRows, err := s.db.QueryContext(ctx, `
+	leRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT le.id::text, le.case_id::text, le.person_id::text, le.event_type::text,
 		       le.event_date::text, le.created_at, le.updated_at, le.deleted_at
 		FROM life_events le
@@ -207,7 +196,7 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 		return nil, fmt.Errorf("iterate trashed life events globally: %w", err)
 	}
 
-	docRows, err := s.db.QueryContext(ctx, `
+	docRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT d.id::text, d.case_id::text, d.person_id::text, d.document_type::text, d.title,
 		       d.created_at, d.updated_at, d.deleted_at
 		FROM documents d
@@ -229,7 +218,7 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 		return nil, fmt.Errorf("iterate trashed documents globally: %w", err)
 	}
 
-	clRows, err := s.db.QueryContext(ctx, `
+	clRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT cl.id::text, cl.case_id::text, cl.root_person_id::text, cl.status::text,
 		       cl.created_at, cl.updated_at, cl.deleted_at
 		FROM claim_lines cl
@@ -252,94 +241,4 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 	}
 
 	return t, nil
-}
-
-func (s *store) RestoreCase(ctx context.Context, caseID string) error {
-	return restore(ctx, s.db, "cases", "id", caseID, "")
-}
-
-func (s *store) RestorePerson(ctx context.Context, caseID, personID string) error {
-	return restore(ctx, s.db, "people", "id", personID, caseID)
-}
-
-func (s *store) RestoreLifeEvent(ctx context.Context, caseID, eventID string) error {
-	return restore(ctx, s.db, "life_events", "id", eventID, caseID)
-}
-
-func (s *store) RestoreDocument(ctx context.Context, caseID, docID string) error {
-	return restore(ctx, s.db, "documents", "id", docID, caseID)
-}
-
-func (s *store) RestoreClaimLine(ctx context.Context, caseID, lineID string) error {
-	return restore(ctx, s.db, "claim_lines", "id", lineID, caseID)
-}
-
-func (s *store) PermanentDeleteCase(ctx context.Context, caseID string) error {
-	return permanentDelete(ctx, s.db, "cases", "id", caseID, "")
-}
-
-func (s *store) PermanentDeletePerson(ctx context.Context, caseID, personID string) error {
-	return permanentDelete(ctx, s.db, "people", "id", personID, caseID)
-}
-
-func (s *store) PermanentDeleteLifeEvent(ctx context.Context, caseID, eventID string) error {
-	return permanentDelete(ctx, s.db, "life_events", "id", eventID, caseID)
-}
-
-func (s *store) PermanentDeleteDocument(ctx context.Context, caseID, docID string) error {
-	return permanentDelete(ctx, s.db, "documents", "id", docID, caseID)
-}
-
-func (s *store) PermanentDeleteClaimLine(ctx context.Context, caseID, lineID string) error {
-	return permanentDelete(ctx, s.db, "claim_lines", "id", lineID, caseID)
-}
-
-// restore clears deleted_at on a single trashed row. If caseID is empty, the
-// case_id filter is omitted (used for cases themselves).
-func restore(ctx context.Context, db *sql.DB, table, idCol, id, caseID string) error {
-	var result sql.Result
-	var err error
-	if caseID == "" {
-		result, err = db.ExecContext(ctx,
-			`UPDATE `+table+` SET deleted_at = NULL WHERE `+idCol+` = $1 AND deleted_at IS NOT NULL`,
-			id)
-	} else {
-		result, err = db.ExecContext(ctx,
-			`UPDATE `+table+` SET deleted_at = NULL WHERE `+idCol+` = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
-			id, caseID)
-	}
-	if err != nil {
-		return fmt.Errorf("restore %s: %w", table, err)
-	}
-	return requireOneRow(result, table)
-}
-
-// permanentDelete hard-deletes a single trashed row. FK CASCADE handles children.
-func permanentDelete(ctx context.Context, db *sql.DB, table, idCol, id, caseID string) error {
-	var result sql.Result
-	var err error
-	if caseID == "" {
-		result, err = db.ExecContext(ctx,
-			`DELETE FROM `+table+` WHERE `+idCol+` = $1 AND deleted_at IS NOT NULL`,
-			id)
-	} else {
-		result, err = db.ExecContext(ctx,
-			`DELETE FROM `+table+` WHERE `+idCol+` = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
-			id, caseID)
-	}
-	if err != nil {
-		return fmt.Errorf("permanent delete %s: %w", table, err)
-	}
-	return requireOneRow(result, table)
-}
-
-func requireOneRow(result sql.Result, table string) error {
-	n, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("rows affected (%s): %w", table, err)
-	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
 }

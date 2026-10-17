@@ -5,7 +5,6 @@
 package documents_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -24,49 +23,45 @@ import (
 )
 
 type testEnv struct {
-	db        *sql.DB
-	svc       *documents.Service
-	casesSvc  *cases.Service
-	peopleSvc *people.Service
-	leSvc     *lifeevents.Service
-	mux       *http.ServeMux
+	db *sql.DB
+	c  *testhelpers.AppClient
 }
 
+// newTestEnv returns an environment that sends requests to the fully assembled
+// application, behind the real authentication middleware, as a logged-in user.
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db := testhelpers.OpenTestDB(t)
 	testhelpers.TruncateCases(t, db)
+	testhelpers.TruncateUsers(t, db)
+	return &testEnv{db: db, c: testhelpers.NewAppClient(t, db)}
+}
 
-	casesSvc := cases.NewService(cases.NewStore(db))
-	peopleSvc := people.NewService(people.NewStore(db))
-	leSvc := lifeevents.NewService(lifeevents.NewStore(db))
-	docSvc := documents.NewService(documents.NewStore(db))
-
-	mux := http.NewServeMux()
-	documents.NewHandler(docSvc, nil).RegisterRoutes(mux)
-
-	return &testEnv{db: db, svc: docSvc, casesSvc: casesSvc, peopleSvc: peopleSvc, leSvc: leSvc, mux: mux}
+func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
+	return e.c.Do(method, path, body)
 }
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
 	t.Helper()
-	c, err := e.casesSvc.CreateCase(context.Background(), "Test Case")
-	require.NoError(t, err)
-	return c
+	var c cases.Case
+	e.c.MustCreateInto(t, "/api/v1/cases", map[string]any{"title": "Test Case"}, &c)
+	return &c
 }
 
 func (e *testEnv) createPerson(t *testing.T, caseID string) people.Person {
 	t.Helper()
-	p, err := e.peopleSvc.CreatePerson(context.Background(), caseID, "Giuseppe", "Rossi", people.UpdatePersonInput{})
-	require.NoError(t, err)
-	return *p
+	var p people.Person
+	e.c.MustCreateInto(t, "/api/v1/cases/"+caseID+"/people",
+		map[string]any{"first_name": "Giuseppe", "last_name": "Rossi"}, &p)
+	return p
 }
 
 func (e *testEnv) createLifeEvent(t *testing.T, caseID, personID string) lifeevents.LifeEvent {
 	t.Helper()
-	le, err := e.leSvc.CreateLifeEvent(context.Background(), caseID, personID, "birth", lifeevents.UpdateLifeEventInput{})
-	require.NoError(t, err)
-	return *le
+	var le lifeevents.LifeEvent
+	e.c.MustCreateInto(t, "/api/v1/cases/"+caseID+"/life-events",
+		map[string]any{"person_id": personID, "event_type": "birth"}, &le)
+	return le
 }
 
 // createDocument creates a document via the HTTP endpoint.
@@ -82,20 +77,6 @@ func (e *testEnv) createDocument(t *testing.T, caseID, personID, docType, title 
 	var d documents.Document
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&d))
 	return d
-}
-
-func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	var buf bytes.Buffer
-	if body != nil {
-		_ = json.NewEncoder(&buf).Encode(body)
-	}
-	req := httptest.NewRequest(method, path, &buf)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	e.mux.ServeHTTP(rec, req)
-	return rec
 }
 
 func assertNotFoundBody(t *testing.T, rec *httptest.ResponseRecorder) {
@@ -438,7 +419,9 @@ func TestDeleteDocument_Valid(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/documents", nil)
-	var got struct{ Total int `json:"total"` }
+	var got struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&got))
 	assert.Equal(t, 0, got.Total)
 }

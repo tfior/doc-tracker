@@ -4,14 +4,49 @@
 
 package trash
 
-import "context"
+import (
+	"context"
+	"database/sql"
+	"fmt"
 
-type Service struct {
-	store Store
+	"github.com/tfior/doc-tracker/platform"
+)
+
+// ErrNotFound means the entity is not in the trash.
+var ErrNotFound = fmt.Errorf("%w in trash", platform.ErrNotFound)
+
+// CaseOwner is what this module needs from the cases module.
+type CaseOwner interface {
+	Restore(ctx context.Context, caseID string) error
+	PermanentDelete(ctx context.Context, caseID string) error
 }
 
-func NewService(store Store) *Service {
-	return &Service{store: store}
+// EntityOwner is what this module needs from each module that owns a
+// soft-deletable entity inside a case.
+type EntityOwner interface {
+	Restore(ctx context.Context, caseID, id string) error
+	PermanentDelete(ctx context.Context, caseID, id string) error
+}
+
+// Owners are the modules that restore and permanently delete their own records.
+type Owners struct {
+	Cases      CaseOwner
+	People     EntityOwner
+	LifeEvents EntityOwner
+	Documents  EntityOwner
+	ClaimLines EntityOwner
+}
+
+// Service lists what is in the trash and coordinates restore and permanent
+// delete. It writes no entity tables itself: each owning module does that.
+type Service struct {
+	store  Store
+	db     *sql.DB
+	owners Owners
+}
+
+func NewService(store Store, db *sql.DB, owners Owners) *Service {
+	return &Service{store: store, db: db, owners: owners}
 }
 
 func (s *Service) GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, error) {
@@ -23,41 +58,47 @@ func (s *Service) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 }
 
 func (s *Service) RestoreCase(ctx context.Context, caseID string) error {
-	return s.store.RestoreCase(ctx, caseID)
-}
-
-func (s *Service) RestorePerson(ctx context.Context, caseID, personID string) error {
-	return s.store.RestorePerson(ctx, caseID, personID)
-}
-
-func (s *Service) RestoreLifeEvent(ctx context.Context, caseID, eventID string) error {
-	return s.store.RestoreLifeEvent(ctx, caseID, eventID)
-}
-
-func (s *Service) RestoreDocument(ctx context.Context, caseID, docID string) error {
-	return s.store.RestoreDocument(ctx, caseID, docID)
-}
-
-func (s *Service) RestoreClaimLine(ctx context.Context, caseID, lineID string) error {
-	return s.store.RestoreClaimLine(ctx, caseID, lineID)
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.Cases.Restore(ctx, caseID) })
 }
 
 func (s *Service) PermanentDeleteCase(ctx context.Context, caseID string) error {
-	return s.store.PermanentDeleteCase(ctx, caseID)
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.Cases.PermanentDelete(ctx, caseID) })
+}
+
+func (s *Service) RestorePerson(ctx context.Context, caseID, personID string) error {
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.People.Restore(ctx, caseID, personID) })
 }
 
 func (s *Service) PermanentDeletePerson(ctx context.Context, caseID, personID string) error {
-	return s.store.PermanentDeletePerson(ctx, caseID, personID)
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.People.PermanentDelete(ctx, caseID, personID) })
+}
+
+func (s *Service) RestoreLifeEvent(ctx context.Context, caseID, eventID string) error {
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.LifeEvents.Restore(ctx, caseID, eventID) })
 }
 
 func (s *Service) PermanentDeleteLifeEvent(ctx context.Context, caseID, eventID string) error {
-	return s.store.PermanentDeleteLifeEvent(ctx, caseID, eventID)
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.LifeEvents.PermanentDelete(ctx, caseID, eventID) })
+}
+
+func (s *Service) RestoreDocument(ctx context.Context, caseID, docID string) error {
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.Documents.Restore(ctx, caseID, docID) })
 }
 
 func (s *Service) PermanentDeleteDocument(ctx context.Context, caseID, docID string) error {
-	return s.store.PermanentDeleteDocument(ctx, caseID, docID)
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.Documents.PermanentDelete(ctx, caseID, docID) })
+}
+
+func (s *Service) RestoreClaimLine(ctx context.Context, caseID, lineID string) error {
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.ClaimLines.Restore(ctx, caseID, lineID) })
 }
 
 func (s *Service) PermanentDeleteClaimLine(ctx context.Context, caseID, lineID string) error {
-	return s.store.PermanentDeleteClaimLine(ctx, caseID, lineID)
+	return s.run(ctx, func(ctx context.Context) error { return s.owners.ClaimLines.PermanentDelete(ctx, caseID, lineID) })
+}
+
+// run executes one owner call as a unit of work and reports a missing entity
+// as not being in the trash.
+func (s *Service) run(ctx context.Context, fn func(ctx context.Context) error) error {
+	return platform.MapNotFound(platform.WithTx(ctx, s.db, fn), ErrNotFound)
 }

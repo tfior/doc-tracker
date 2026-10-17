@@ -5,8 +5,7 @@
 package lifeevents_test
 
 import (
-	"bytes"
-	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,39 +20,37 @@ import (
 )
 
 type testEnv struct {
-	svc      *lifeevents.Service
-	casesSvc *cases.Service
-	peopleSvc *people.Service
-	mux      *http.ServeMux
+	db *sql.DB
+	c  *testhelpers.AppClient
 }
 
+// newTestEnv returns an environment that sends requests to the fully assembled
+// application, behind the real authentication middleware, as a logged-in user.
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db := testhelpers.OpenTestDB(t)
 	testhelpers.TruncateCases(t, db)
+	testhelpers.TruncateUsers(t, db)
+	return &testEnv{db: db, c: testhelpers.NewAppClient(t, db)}
+}
 
-	casesSvc := cases.NewService(cases.NewStore(db))
-	peopleSvc := people.NewService(people.NewStore(db))
-	leSvc := lifeevents.NewService(lifeevents.NewStore(db))
-
-	mux := http.NewServeMux()
-	lifeevents.NewHandler(leSvc, nil).RegisterRoutes(mux)
-
-	return &testEnv{svc: leSvc, casesSvc: casesSvc, peopleSvc: peopleSvc, mux: mux}
+func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
+	return e.c.Do(method, path, body)
 }
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
 	t.Helper()
-	c, err := e.casesSvc.CreateCase(context.Background(), "Test Case")
-	require.NoError(t, err)
-	return c
+	var c cases.Case
+	e.c.MustCreateInto(t, "/api/v1/cases", map[string]any{"title": "Test Case"}, &c)
+	return &c
 }
 
 func (e *testEnv) createPerson(t *testing.T, caseID string) people.Person {
 	t.Helper()
-	p, err := e.peopleSvc.CreatePerson(context.Background(), caseID, "Giuseppe", "Rossi", people.UpdatePersonInput{})
-	require.NoError(t, err)
-	return *p
+	var p people.Person
+	e.c.MustCreateInto(t, "/api/v1/cases/"+caseID+"/people",
+		map[string]any{"first_name": "Giuseppe", "last_name": "Rossi"}, &p)
+	return p
 }
 
 // createLifeEvent creates a life event via the HTTP endpoint.
@@ -68,20 +65,6 @@ func (e *testEnv) createLifeEvent(t *testing.T, caseID, personID, eventType stri
 	var le lifeevents.LifeEvent
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&le))
 	return le
-}
-
-func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	var buf bytes.Buffer
-	if body != nil {
-		_ = json.NewEncoder(&buf).Encode(body)
-	}
-	req := httptest.NewRequest(method, path, &buf)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	e.mux.ServeHTTP(rec, req)
-	return rec
 }
 
 // ---------------------------------------------------------------------------

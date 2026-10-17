@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/lib/pq"
+	"github.com/tfior/doc-tracker/platform"
 )
 
 type Store interface {
@@ -29,7 +30,7 @@ func NewStore(db *sql.DB) Store {
 
 func (s *store) GetByEmail(ctx context.Context, email string) (*User, error) {
 	u := &User{}
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT id::text, email, first_name, last_name, password_hash, created_at, updated_at
 		FROM users WHERE email = $1`, email).
 		Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt)
@@ -44,7 +45,7 @@ func (s *store) GetByEmail(ctx context.Context, email string) (*User, error) {
 
 func (s *store) GetByID(ctx context.Context, id string) (*User, error) {
 	u := &User{}
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT id::text, email, first_name, last_name, password_hash, created_at, updated_at
 		FROM users WHERE id = $1`, id).
 		Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt)
@@ -59,7 +60,7 @@ func (s *store) GetByID(ctx context.Context, id string) (*User, error) {
 
 func (s *store) Create(ctx context.Context, email, firstName, lastName, passwordHash string) (*User, error) {
 	u := &User{}
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		INSERT INTO users (email, first_name, last_name, password_hash)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id::text, email, first_name, last_name, password_hash, created_at, updated_at`,

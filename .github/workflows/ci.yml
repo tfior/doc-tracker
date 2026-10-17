@@ -32,6 +32,24 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
+      - name: Check formatting
+        working-directory: backend
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+
+      - name: Vulnerability scan
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
       - name: Run tests
         working-directory: backend
         run: go test -p 1 ./...

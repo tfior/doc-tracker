@@ -4,7 +4,11 @@
 
 package people
 
-import "time"
+import (
+	"time"
+
+	"github.com/tfior/doc-tracker/platform"
+)
 
 type Person struct {
 	ID         string    `json:"id"`
@@ -29,17 +33,8 @@ type Relationship struct {
 type UpdatePersonInput struct {
 	FirstName  *string
 	LastName   *string
-	BirthDate  NullableField
-	BirthPlace NullableField
-	DeathDate  NullableField
-	Notes      NullableField
-}
-
-// NullableField carries the three-state value used for optional nullable fields
-// in PATCH requests: absent (Set=false), explicit null (Set=true, Valid=false),
-// or a string value (Set=true, Valid=true).
-type NullableField struct {
-	Set   bool
-	Valid bool
-	Value string
+	BirthDate  platform.NullString
+	BirthPlace platform.NullString
+	DeathDate  platform.NullString
+	Notes      platform.NullString
 }

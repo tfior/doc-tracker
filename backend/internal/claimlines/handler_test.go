@@ -5,8 +5,7 @@
 package claimlines_test
 
 import (
-	"bytes"
-	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,39 +20,37 @@ import (
 )
 
 type testEnv struct {
-	svc       *claimlines.Service
-	casesSvc  *cases.Service
-	peopleSvc *people.Service
-	mux       *http.ServeMux
+	db *sql.DB
+	c  *testhelpers.AppClient
 }
 
+// newTestEnv returns an environment that sends requests to the fully assembled
+// application, behind the real authentication middleware, as a logged-in user.
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db := testhelpers.OpenTestDB(t)
 	testhelpers.TruncateCases(t, db)
+	testhelpers.TruncateUsers(t, db)
+	return &testEnv{db: db, c: testhelpers.NewAppClient(t, db)}
+}
 
-	casesSvc := cases.NewService(cases.NewStore(db))
-	peopleSvc := people.NewService(people.NewStore(db))
-	clSvc := claimlines.NewService(claimlines.NewStore(db))
-
-	mux := http.NewServeMux()
-	claimlines.NewHandler(clSvc, nil).RegisterRoutes(mux)
-
-	return &testEnv{svc: clSvc, casesSvc: casesSvc, peopleSvc: peopleSvc, mux: mux}
+func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
+	return e.c.Do(method, path, body)
 }
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
 	t.Helper()
-	c, err := e.casesSvc.CreateCase(context.Background(), "Test Case")
-	require.NoError(t, err)
-	return c
+	var c cases.Case
+	e.c.MustCreateInto(t, "/api/v1/cases", map[string]any{"title": "Test Case"}, &c)
+	return &c
 }
 
 func (e *testEnv) createPerson(t *testing.T, caseID string) people.Person {
 	t.Helper()
-	p, err := e.peopleSvc.CreatePerson(context.Background(), caseID, "Giuseppe", "Rossi", people.UpdatePersonInput{})
-	require.NoError(t, err)
-	return *p
+	var p people.Person
+	e.c.MustCreateInto(t, "/api/v1/cases/"+caseID+"/people",
+		map[string]any{"first_name": "Giuseppe", "last_name": "Rossi"}, &p)
+	return p
 }
 
 // createClaimLine creates a claim line via the HTTP endpoint.
@@ -67,20 +64,6 @@ func (e *testEnv) createClaimLine(t *testing.T, caseID, rootPersonID string) cla
 	var cl claimlines.ClaimLine
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&cl))
 	return cl
-}
-
-func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	var buf bytes.Buffer
-	if body != nil {
-		_ = json.NewEncoder(&buf).Encode(body)
-	}
-	req := httptest.NewRequest(method, path, &buf)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	e.mux.ServeHTTP(rec, req)
-	return rec
 }
 
 func assertNotFoundBody(t *testing.T, rec *httptest.ResponseRecorder) {
@@ -325,7 +308,9 @@ func TestDeleteClaimLine_Valid(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/claim-lines", nil)
-	var got struct{ Total int `json:"total"` }
+	var got struct {
+		Total int `json:"total"`
+	}
 	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&got))
 	assert.Equal(t, 0, got.Total)
 }

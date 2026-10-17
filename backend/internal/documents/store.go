@@ -9,9 +9,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/tfior/doc-tracker/platform"
 )
 
-var ErrNotFound = errors.New("document not found")
+var ErrNotFound = fmt.Errorf("document %w", platform.ErrNotFound)
 var ErrInvalidStatus = errors.New("status does not belong to the requested phase")
 
 var validPhases = map[string]bool{
@@ -26,6 +28,8 @@ type Store interface {
 	DeleteDocument(ctx context.Context, caseID, docID string) error
 	TransitionStatus(ctx context.Context, caseID, docID string, input TransitionStatusInput) (*Document, error)
 	ReassignDocument(ctx context.Context, caseID, docID string, input ReassignDocumentInput) (*Document, error)
+	Restore(ctx context.Context, caseID, id string) error
+	PermanentDelete(ctx context.Context, caseID, id string) error
 }
 
 type store struct {
@@ -38,14 +42,14 @@ func NewStore(db *sql.DB) Store {
 
 func (s *store) ListDocuments(ctx context.Context, caseID string, page, perPage int) ([]Document, int, error) {
 	var total int
-	if err := s.db.QueryRowContext(ctx,
+	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM documents WHERE case_id = $1 AND deleted_at IS NULL`, caseID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count documents: %w", err)
 	}
 
 	offset := (page - 1) * perPage
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT
 			d.id::text, d.case_id::text, d.person_id::text, d.life_event_id::text,
 			d.document_type::text, d.title,
@@ -92,12 +96,12 @@ func (s *store) ListDocumentStatuses(ctx context.Context, phase string) ([]Docum
 	var err error
 
 	if phase == "" {
-		rows, err = s.db.QueryContext(ctx, `
+		rows, err = platform.Conn(ctx, s.db).QueryContext(ctx, `
 			SELECT id::text, label, phase::text, is_system, progress_bucket::text
 			FROM document_statuses
 			ORDER BY phase, progress_bucket, label`)
 	} else {
-		rows, err = s.db.QueryContext(ctx, `
+		rows, err = platform.Conn(ctx, s.db).QueryContext(ctx, `
 			SELECT id::text, label, phase::text, is_system, progress_bucket::text
 			FROM document_statuses
 			WHERE phase = $1 OR phase = 'any'
@@ -125,14 +129,6 @@ func (s *store) ListDocumentStatuses(ctx context.Context, phase string) ([]Docum
 }
 
 func (s *store) CreateDocument(ctx context.Context, caseID, personID, docType, title string, input UpdateDocumentInput) (*Document, error) {
-	if err := s.requirePersonInCase(ctx, caseID, personID); err != nil {
-		return nil, err
-	}
-	if input.LifeEventID.Set && input.LifeEventID.Valid {
-		if err := s.requireLifeEventInCase(ctx, caseID, input.LifeEventID.Value); err != nil {
-			return nil, err
-		}
-	}
 
 	defaults, err := s.phaseDefaults(ctx)
 	if err != nil {
@@ -145,7 +141,7 @@ func (s *store) CreateDocument(ctx context.Context, caseID, personID, docType, t
 	}
 
 	var docID string
-	err = s.db.QueryRowContext(ctx, `
+	err = platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		INSERT INTO documents
 			(case_id, person_id, life_event_id,
 			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
@@ -186,7 +182,7 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 		isVerifiedValue = *input.IsVerified
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE documents SET
 			title                = COALESCE($3, title),
 			document_type        = COALESCE($4::document_type, document_type),
@@ -234,7 +230,7 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 }
 
 func (s *store) DeleteDocument(ctx context.Context, caseID, docID string) error {
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE documents SET deleted_at = NOW()
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		docID, caseID,
@@ -255,7 +251,7 @@ func (s *store) DeleteDocument(ctx context.Context, caseID, docID string) error 
 func (s *store) TransitionStatus(ctx context.Context, caseID, docID string, input TransitionStatusInput) (*Document, error) {
 	// Verify the status exists and belongs to the requested phase (or is 'any').
 	var statusPhase string
-	if err := s.db.QueryRowContext(ctx,
+	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT phase::text FROM document_statuses WHERE id = $1`, input.StatusID,
 	).Scan(&statusPhase); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -268,7 +264,7 @@ func (s *store) TransitionStatus(ctx context.Context, caseID, docID string, inpu
 	}
 
 	col := phaseColumn(input.Phase)
-	result, err := s.db.ExecContext(ctx,
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
 		fmt.Sprintf(`UPDATE documents SET %s = $3, updated_at = NOW()
 			WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`, col),
 		docID, caseID, input.StatusID,
@@ -288,16 +284,8 @@ func (s *store) TransitionStatus(ctx context.Context, caseID, docID string, inpu
 }
 
 func (s *store) ReassignDocument(ctx context.Context, caseID, docID string, input ReassignDocumentInput) (*Document, error) {
-	if err := s.requirePersonInCase(ctx, caseID, input.PersonID); err != nil {
-		return nil, err
-	}
-	if input.LifeEventID.Set && input.LifeEventID.Valid {
-		if err := s.requireLifeEventInCase(ctx, caseID, input.LifeEventID.Value); err != nil {
-			return nil, err
-		}
-	}
 
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE documents SET
 			person_id     = $3,
 			life_event_id = CASE WHEN $4 THEN $5::uuid ELSE life_event_id END,
@@ -322,7 +310,7 @@ func (s *store) ReassignDocument(ctx context.Context, caseID, docID string, inpu
 }
 
 func (s *store) getDocument(ctx context.Context, caseID, docID string) (*Document, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT
 			d.id::text, d.case_id::text, d.person_id::text, d.life_event_id::text,
 			d.document_type::text, d.title,
@@ -355,7 +343,7 @@ func (s *store) getDocument(ctx context.Context, caseID, docID string) (*Documen
 
 // phaseDefaults returns a map of phase → default status UUID for document creation.
 func (s *store) phaseDefaults(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT phase::text, id::text FROM document_statuses WHERE system_key IN
 		 ('official_copy_default', 'amendment_default', 'apostille_default', 'translation_default')`)
 	if err != nil {
@@ -378,34 +366,6 @@ func (s *store) phaseDefaults(ctx context.Context) (map[string]string, error) {
 		return nil, fmt.Errorf("expected 4 phase defaults, got %d", len(defaults))
 	}
 	return defaults, nil
-}
-
-func (s *store) requirePersonInCase(ctx context.Context, caseID, personID string) error {
-	var count int
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM people WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
-		personID, caseID,
-	).Scan(&count); err != nil {
-		return fmt.Errorf("verify person: %w", err)
-	}
-	if count == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *store) requireLifeEventInCase(ctx context.Context, caseID, lifeEventID string) error {
-	var count int
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM life_events WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
-		lifeEventID, caseID,
-	).Scan(&count); err != nil {
-		return fmt.Errorf("verify life event: %w", err)
-	}
-	if count == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func scanDocument(scan func(...any) error) (*Document, error) {
@@ -463,7 +423,7 @@ func phaseColumn(phase string) string {
 	}
 }
 
-func nullToSQL(f NullableField) sql.NullString {
+func nullToSQL(f platform.NullString) sql.NullString {
 	return sql.NullString{String: f.Value, Valid: f.Valid}
 }
 
@@ -472,4 +432,24 @@ func setString(dest **string, ns sql.NullString) {
 		s := ns.String
 		*dest = &s
 	}
+}
+
+func (s *store) Restore(ctx context.Context, caseID, id string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`UPDATE documents SET deleted_at = NULL WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		id, caseID)
+	if err != nil {
+		return fmt.Errorf("restore document: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`DELETE FROM documents WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		id, caseID)
+	if err != nil {
+		return fmt.Errorf("permanent delete document: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
 }

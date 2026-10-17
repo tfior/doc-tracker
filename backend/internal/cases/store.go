@@ -9,9 +9,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/tfior/doc-tracker/platform"
 )
 
-var ErrNotFound = errors.New("case not found")
+var ErrNotFound = fmt.Errorf("case %w", platform.ErrNotFound)
 
 type Store interface {
 	ListCases(ctx context.Context, page, perPage int) ([]Case, int, error)
@@ -19,6 +21,8 @@ type Store interface {
 	CreateCase(ctx context.Context, title string) (*Case, error)
 	UpdateCase(ctx context.Context, caseID string, title *string, status *string) (*Case, error)
 	DeleteCase(ctx context.Context, caseID string) error
+	RestoreCase(ctx context.Context, caseID string) error
+	PermanentDeleteCase(ctx context.Context, caseID string) error
 }
 
 type store struct {
@@ -31,12 +35,12 @@ func NewStore(db *sql.DB) Store {
 
 func (s *store) ListCases(ctx context.Context, page, perPage int) ([]Case, int, error) {
 	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM cases WHERE deleted_at IS NULL`).Scan(&total); err != nil {
+	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `SELECT COUNT(*) FROM cases WHERE deleted_at IS NULL`).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count cases: %w", err)
 	}
 
 	offset := (page - 1) * perPage
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT id::text, title, status::text, primary_root_person_id::text, created_at, updated_at
 		FROM cases
 		WHERE deleted_at IS NULL
@@ -71,7 +75,7 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 	var d CaseDetail
 	var primaryRootPersonID sql.NullString
 
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT
 			c.id::text,
 			c.title,
@@ -113,7 +117,7 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 func (s *store) CreateCase(ctx context.Context, title string) (*Case, error) {
 	var c Case
 	var primaryRootPersonID sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		INSERT INTO cases (title)
 		VALUES ($1)
 		RETURNING id::text, title, status::text, primary_root_person_id::text, created_at, updated_at`,
@@ -131,7 +135,7 @@ func (s *store) CreateCase(ctx context.Context, title string) (*Case, error) {
 func (s *store) UpdateCase(ctx context.Context, caseID string, title *string, status *string) (*Case, error) {
 	var c Case
 	var primaryRootPersonID sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		UPDATE cases
 		SET
 			title      = COALESCE($2, title),
@@ -154,7 +158,7 @@ func (s *store) UpdateCase(ctx context.Context, caseID string, title *string, st
 }
 
 func (s *store) DeleteCase(ctx context.Context, caseID string) error {
-	result, err := s.db.ExecContext(ctx, `
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE cases SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`,
 		caseID,
 	)
@@ -169,4 +173,22 @@ func (s *store) DeleteCase(ctx context.Context, caseID string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (s *store) RestoreCase(ctx context.Context, caseID string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`UPDATE cases SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL`, caseID)
+	if err != nil {
+		return fmt.Errorf("restore case: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+func (s *store) PermanentDeleteCase(ctx context.Context, caseID string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`DELETE FROM cases WHERE id = $1 AND deleted_at IS NOT NULL`, caseID)
+	if err != nil {
+		return fmt.Errorf("permanent delete case: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
 }

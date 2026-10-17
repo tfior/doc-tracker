@@ -58,10 +58,10 @@ type TrashedClaimLine struct {
 }
 
 type CaseTrash struct {
-	People     []TrashedPerson     `json:"people"`
-	LifeEvents []TrashedLifeEvent  `json:"life_events"`
-	Documents  []TrashedDocument   `json:"documents"`
-	ClaimLines []TrashedClaimLine  `json:"claim_lines"`
+	People     []TrashedPerson    `json:"people"`
+	LifeEvents []TrashedLifeEvent `json:"life_events"`
+	Documents  []TrashedDocument  `json:"documents"`
+	ClaimLines []TrashedClaimLine `json:"claim_lines"`
 }
 
 type GlobalTrash struct {

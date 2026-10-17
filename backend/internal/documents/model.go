@@ -4,35 +4,30 @@
 
 package documents
 
-import "time"
+import (
+	"time"
 
-// NullableField carries the three-state value for optional nullable fields in
-// PATCH requests: absent (Set=false), explicit null (Set=true, Valid=false),
-// or a value (Set=true, Valid=true).
-type NullableField struct {
-	Set   bool
-	Valid bool
-	Value string
-}
+	"github.com/tfior/doc-tracker/platform"
+)
 
 type UpdateDocumentInput struct {
 	Title              *string
 	DocumentType       *string
-	LifeEventID        NullableField // used on create only; ignored by update handler
-	IssuingAuthority   NullableField
-	IssueDate          NullableField
-	RecordedDate       NullableField
-	RecordedGivenName  NullableField
-	RecordedSurname    NullableField
-	RecordedBirthDate  NullableField
-	RecordedBirthPlace NullableField
-	Notes              NullableField
+	LifeEventID        platform.NullString // used on create only; ignored by update handler
+	IssuingAuthority   platform.NullString
+	IssueDate          platform.NullString
+	RecordedDate       platform.NullString
+	RecordedGivenName  platform.NullString
+	RecordedSurname    platform.NullString
+	RecordedBirthDate  platform.NullString
+	RecordedBirthPlace platform.NullString
+	Notes              platform.NullString
 	IsVerified         *bool
 }
 
 type ReassignDocumentInput struct {
 	PersonID    string
-	LifeEventID NullableField
+	LifeEventID platform.NullString
 }
 
 type TransitionStatusInput struct {

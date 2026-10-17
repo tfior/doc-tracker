@@ -50,10 +50,11 @@ doc-tracker/
 ├── backend/
 │   ├── cmd/
 │   │   ├── server/
-│   │   │   └── main.go          # wires everything
+│   │   │   └── main.go          # starts the server
 │   │   ├── create-user/         # CLI: create a user
 │   │   └── seed/                # CLI: load sample cases
 │   ├── internal/
+│   │   ├── app/                 # assembles modules into the HTTP handler; used by the server and tests
 │   │   ├── auth/
 │   │   ├── users/
 │   │   ├── activitylog/
@@ -137,7 +138,7 @@ Three rules govern how modules relate to each other's data.
 
 ### How modules call each other
 
-Feature modules do not import each other. A module that needs something from another declares a small interface describing what it needs, and `cmd/server/main.go` supplies the owning module's implementation at startup.
+Feature modules do not import each other. A module that needs something from another declares a small interface describing what it needs, and `internal/app` supplies the owning module's implementation at startup.
 
 ```go
 // in package documents
@@ -166,7 +167,7 @@ documents    ← additionally imports storage's interface      (planned)
 exports      ← imports storage's interface                   (planned)
 ```
 
-No cycles. Everything else a module needs from another arrives through an interface wired in `cmd/server/main.go`, which is the only package that imports every module.
+No cycles. Everything else a module needs from another arrives through an interface wired in `internal/app`, which is the only package that imports every module.
 
 ## Key Constraints
 

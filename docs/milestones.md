@@ -20,6 +20,8 @@ The design docs (`domain-model.md`, `architecture.md`, `api-conventions.md`) des
 - Every domain rule a milestone touches gets a test that would fail if the rule were not enforced.
 - When a branch touches a file, it also clears that file's entries in the Small Fixes checklist at the end of this document.
 - A migration never discards data.
+- From Milestone 7 onward, a branch that adds a migration runs it against a copy of a realistic database before merging, not only an empty one.
+- A pull request is ready when: all tests pass; the milestone's tasks it completes are ticked; the design docs agree with the code; and the Small Fixes entries for every file it touched are cleared.
 
 ---
 
@@ -150,12 +152,12 @@ Makes every write all-or-nothing, gives each rule a single owner, and fixes the 
 ### Backend
 
 Structure
-- [ ] Transaction helper in `platform`; stores run on the transaction their service opened
-- [ ] Services own each unit of work: the change and its activity log entry in one transaction
-- [ ] Module boundaries: modules declare the interfaces they need, wired in `cmd/server/main.go`; each module is the only writer of its tables
+- [x] Transaction helper in `platform`; stores run on the transaction their service opened
+- [x] Services own each unit of work: the change and its activity log entry in one transaction
+- [x] Module boundaries: modules declare the interfaces they need, wired in `internal/app`; each module is the only writer of its tables
 - [ ] Each owning module answers "is this active?" for its entities: exists, in the case, not trashed, not beneath a trashed parent
-- [ ] `trash` becomes a coordinator; owning modules restore and permanently delete their own records
-- [ ] Confirm gone: the per-handler logging helper, the per-module nullable field type, the repeated person-in-case check
+- [x] `trash` becomes a coordinator; owning modules restore and permanently delete their own records
+- [x] Confirm gone: the per-handler logging helper, the per-module nullable field type, the repeated person-in-case check
 
 Defects from the review
 - [ ] Circular parent links are refused
@@ -166,6 +168,7 @@ Defects from the review
 - [ ] The two-parent limit counts only active parents
 - [ ] One claim line per root ancestor per case
 - [ ] Permanently deleting a life event deletes its documents (migration: change the foreign key to CASCADE)
+- [ ] An active check locks the row it checks until the write commits, so a parent trashed at the same moment cannot receive a new child
 
 Activity log
 - [ ] `changes` holds the old and new value of each field that actually changed
@@ -183,7 +186,7 @@ API
 - [ ] Unknown request fields are rejected; names are trimmed and must not be blank
 - [ ] Every server error is logged with its cause
 - [ ] Deleting a person or life event reports what goes with it, for the confirmation dialog
-- [ ] Handler tests run behind the auth middleware
+- [x] Handler tests run behind the auth middleware
 
 ### Frontend
 
@@ -198,7 +201,7 @@ API
 ### Infrastructure
 
 - [ ] `make schema` generates `db/schema.sql` from a freshly migrated database; CI fails if the committed file is stale
-- [ ] CI runs `gofmt`, `go vet`, and `govulncheck`
+- [x] CI runs `gofmt`, `go vet`, and `govulncheck`
 
 ---
 
@@ -316,6 +319,7 @@ After this milestone the app answers "what is still outstanding on this case?".
 - [ ] Create-user and password-reset commands inside the image
 - [ ] Request logging and a clean shutdown
 - [ ] The container runs as a non-root user
+- [ ] End-to-end tests for the critical paths: logging in, creating a case with people, life events and documents, changing a document's status, and seeing it become ready
 
 ### Security
 
@@ -370,7 +374,7 @@ Scans are attached to documents and can be opened or downloaded one at a time.
 
 Minor issues found in the October 2026 review. Each is cleared when its file is next touched, and **all must be ticked before the MVP is complete**, whether or not their files were touched along the way. The milestone in brackets is where each is expected to fall.
 
-- [ ] Go files formatted to `gofmt` standard (3)
+- [x] Go files formatted to `gofmt` standard (3)
 - [ ] A document cannot be restored from the trash while its person or life event is still in it (3)
 - [ ] Two simultaneous requests cannot give a person a third parent (3)
 - [ ] Lists for a case that does not exist return not found, not an empty list (3)

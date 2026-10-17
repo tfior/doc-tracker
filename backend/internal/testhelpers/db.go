@@ -79,6 +79,11 @@ func OpenTestDB(t *testing.T) *sql.DB {
 	}
 	m.Close()
 
+	// Remove a log-rejecting trigger left behind if an earlier run was killed
+	// before its cleanup ran (see FailActivityLogWrites).
+	_, _ = db.Exec(`DROP TRIGGER IF EXISTS test_reject_activity_log ON activity_logs`)
+	_, _ = db.Exec(`DROP FUNCTION IF EXISTS test_reject_activity_log()`)
+
 	t.Cleanup(func() { db.Close() })
 	return db
 }
