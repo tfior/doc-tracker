@@ -47,7 +47,10 @@ func NewHandler(db *sql.DB) http.Handler {
 		LifeEvents: lifeEventsSvc,
 		Documents:  documentsSvc,
 		ClaimLines: claimLinesSvc,
-	})
+
+		WithPerson:    []trash.PersonDependent{peopleSvc, lifeEventsSvc, documentsSvc, claimLinesSvc},
+		WithLifeEvent: []trash.LifeEventDependent{documentsSvc},
+	}, auth.UserIDFromContext)
 
 	for _, r := range []platform.RouteRegistrar{
 		auth.NewHandler(authSvc),

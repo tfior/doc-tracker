@@ -7,6 +7,7 @@ package people
 import (
 	"time"
 
+	"github.com/tfior/doc-tracker/internal/activitylog"
 	"github.com/tfior/doc-tracker/platform"
 )
 
@@ -37,4 +38,16 @@ type UpdatePersonInput struct {
 	BirthPlace platform.NullString
 	DeathDate  platform.NullString
 	Notes      platform.NullString
+}
+
+// logFields is what the activity log compares when a person changes.
+func (p *Person) logFields() activitylog.Fields {
+	return activitylog.Fields{
+		"first_name":  p.FirstName,
+		"last_name":   p.LastName,
+		"birth_date":  activitylog.Value(p.BirthDate),
+		"birth_place": activitylog.Value(p.BirthPlace),
+		"death_date":  activitylog.Value(p.DeathDate),
+		"notes":       activitylog.Value(p.Notes),
+	}
 }

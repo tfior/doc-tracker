@@ -24,6 +24,9 @@ const (
 )
 
 type Store interface {
+	LinksOf(ctx context.Context, caseID, personID string) ([]Relationship, error)
+	Get(ctx context.Context, caseID, id string) (*Person, error)
+	LogName(ctx context.Context, caseID, id string) (string, error)
 	LockActive(ctx context.Context, caseID, id string) error
 	ListPeople(ctx context.Context, caseID string, page, perPage int) ([]Person, int, error)
 	CreatePerson(ctx context.Context, caseID, firstName, lastName string, input UpdatePersonInput) (*Person, error)
@@ -402,4 +405,46 @@ func (s *store) LockPeople(ctx context.Context, ids ...string) error {
 		return fmt.Errorf("lock people: %w", err)
 	}
 	return nil
+}
+
+// Get returns an active record, for the "before" side of an update's log entry.
+func (s *store) Get(ctx context.Context, caseID, id string) (*Person, error) {
+	return s.getPerson(ctx, caseID, id)
+}
+
+// LogName is the record's name for the activity log. It reads trashed records
+// too, so restores and permanent deletes can be named.
+func (s *store) LogName(ctx context.Context, caseID, id string) (string, error) {
+	var name string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT first_name || ' ' || last_name FROM people WHERE id = $1 AND case_id = $2`, id, caseID,
+	).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("log name: %w", err)
+	}
+	return name, nil
+}
+
+// LinksOf returns every parent link a person is part of, as child or parent.
+func (s *store) LinksOf(ctx context.Context, caseID, personID string) ([]Relationship, error) {
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
+		SELECT person_id::text, parent_id::text FROM person_relationships
+		WHERE case_id = $1 AND (person_id = $2 OR parent_id = $2)
+		ORDER BY person_id, parent_id`, caseID, personID)
+	if err != nil {
+		return nil, fmt.Errorf("links of person: %w", err)
+	}
+	defer rows.Close()
+	links := []Relationship{}
+	for rows.Next() {
+		r := Relationship{CaseID: caseID}
+		if err := rows.Scan(&r.PersonID, &r.ParentID); err != nil {
+			return nil, fmt.Errorf("links of person: %w", err)
+		}
+		links = append(links, r)
+	}
+	return links, rows.Err()
 }

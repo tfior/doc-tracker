@@ -16,6 +16,8 @@ import (
 var ErrNotFound = fmt.Errorf("case %w", platform.ErrNotFound)
 
 type Store interface {
+	Get(ctx context.Context, caseID string) (*Case, error)
+	LogName(ctx context.Context, caseID string) (string, error)
 	ListCases(ctx context.Context, page, perPage int) ([]Case, int, error)
 	GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 	CreateCase(ctx context.Context, title string) (*Case, error)
@@ -228,4 +230,38 @@ func lockRow(ctx context.Context, db *sql.DB, query string, args ...any) error {
 		return fmt.Errorf("lock row: %w", err)
 	}
 	return nil
+}
+
+// LogName is the case's name for the activity log: its title. It reads trashed
+// cases too, so restores and permanent deletes can be named.
+func (s *store) LogName(ctx context.Context, caseID string) (string, error) {
+	var name string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `SELECT title FROM cases WHERE id = $1`, caseID).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("case log name: %w", err)
+	}
+	return name, nil
+}
+
+// Get returns an active case, for the "before" side of an update's log entry.
+func (s *store) Get(ctx context.Context, caseID string) (*Case, error) {
+	var c Case
+	var primaryRootPersonID sql.NullString
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT id::text, title, status::text, primary_root_person_id::text, created_at, updated_at
+		FROM cases WHERE id = $1 AND deleted_at IS NULL`, caseID,
+	).Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.CreatedAt, &c.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get case: %w", err)
+	}
+	if primaryRootPersonID.Valid {
+		c.PrimaryRootPersonID = &primaryRootPersonID.String
+	}
+	return &c, nil
 }

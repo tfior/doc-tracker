@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tfior/doc-tracker/platform"
 )
@@ -16,6 +17,9 @@ import (
 var ErrNotFound = fmt.Errorf("life event %w", platform.ErrNotFound)
 
 type Store interface {
+	IDsForPerson(ctx context.Context, caseID, personID string) ([]string, error)
+	Get(ctx context.Context, caseID, id string) (*LifeEvent, error)
+	LogName(ctx context.Context, caseID, id string) (string, error)
 	LockActive(ctx context.Context, caseID, id string) (personID string, err error)
 	ListLifeEvents(ctx context.Context, caseID string, page, perPage int) ([]LifeEvent, int, error)
 	CreateLifeEvent(ctx context.Context, caseID, personID, eventType string, input UpdateLifeEventInput) (*LifeEvent, error)
@@ -313,4 +317,55 @@ func (s *store) LockActive(ctx context.Context, caseID, id string) (string, erro
 		return "", fmt.Errorf("lock life_events: %w", err)
 	}
 	return s.RequireActive(ctx, caseID, id)
+}
+
+// Get returns an active record, for the "before" side of an update's log entry.
+func (s *store) Get(ctx context.Context, caseID, id string) (*LifeEvent, error) {
+	return s.getLifeEvent(ctx, caseID, id)
+}
+
+// LogName is the record's name for the activity log. It reads trashed records
+// too, so restores and permanent deletes can be named.
+func (s *store) LogName(ctx context.Context, caseID, id string) (string, error) {
+	var eventType, person string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT le.event_type::text, p.first_name || ' ' || p.last_name
+		FROM life_events le JOIN people p ON p.id = le.person_id
+		WHERE le.id = $1 AND le.case_id = $2`, id, caseID,
+	).Scan(&eventType, &person)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("log name: %w", err)
+	}
+	return eventTypeLabel(eventType) + " life event for " + person, nil
+}
+
+// eventTypeLabel turns an event type into the form used in log names:
+// "naturalization" becomes "Naturalization".
+func eventTypeLabel(eventType string) string {
+	if eventType == "" {
+		return eventType
+	}
+	return strings.ToUpper(eventType[:1]) + strings.ReplaceAll(eventType[1:], "_", " ")
+}
+
+// IDsForPerson returns the IDs of a person's life events, trashed ones included.
+func (s *store) IDsForPerson(ctx context.Context, caseID, personID string) ([]string, error) {
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx,
+		`SELECT id::text FROM life_events WHERE case_id = $1 AND person_id = $2 ORDER BY id`, caseID, personID)
+	if err != nil {
+		return nil, fmt.Errorf("IDsForPerson: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("IDsForPerson: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

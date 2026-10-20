@@ -21,6 +21,10 @@ var validPhases = map[string]bool{
 }
 
 type Store interface {
+	IDsForLifeEvent(ctx context.Context, caseID, eventID string) ([]string, error)
+	IDsForPerson(ctx context.Context, caseID, personID string) ([]string, error)
+	Get(ctx context.Context, caseID, id string) (*Document, error)
+	LogName(ctx context.Context, caseID, id string) (string, error)
 	LockActive(ctx context.Context, caseID, id string) (personID string, err error)
 	ListDocuments(ctx context.Context, caseID string, page, perPage int) ([]Document, int, error)
 	ListDocumentStatuses(ctx context.Context, phase string) ([]DocumentStatus, error)
@@ -521,9 +525,11 @@ func (s *store) TrashedParents(ctx context.Context, caseID, docID string) (strin
 // the trash, the event's new person.
 func (s *store) MoveEventDocuments(ctx context.Context, caseID, eventID, personID string) ([]MovedDocument, error) {
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
-		UPDATE documents SET person_id = $3, updated_at = NOW()
-		WHERE life_event_id = $1 AND case_id = $2 AND person_id <> $3
-		RETURNING id::text, title`,
+		UPDATE documents d SET person_id = $3, updated_at = NOW()
+		FROM (SELECT id, person_id FROM documents
+		      WHERE life_event_id = $1 AND case_id = $2 AND person_id <> $3) old
+		WHERE d.id = old.id
+		RETURNING d.id::text, d.title, old.person_id::text`,
 		eventID, caseID, personID,
 	)
 	if err != nil {
@@ -533,7 +539,7 @@ func (s *store) MoveEventDocuments(ctx context.Context, caseID, eventID, personI
 	moved := []MovedDocument{}
 	for rows.Next() {
 		var m MovedDocument
-		if err := rows.Scan(&m.ID, &m.Title); err != nil {
+		if err := rows.Scan(&m.ID, &m.Title, &m.FromPersonID); err != nil {
 			return nil, fmt.Errorf("scan moved document: %w", err)
 		}
 		moved = append(moved, m)
@@ -563,4 +569,63 @@ func (s *store) LockEventDocuments(ctx context.Context, caseID, eventID string) 
 		return fmt.Errorf("lock event documents: %w", err)
 	}
 	return nil
+}
+
+// Get returns an active record, for the "before" side of an update's log entry.
+func (s *store) Get(ctx context.Context, caseID, id string) (*Document, error) {
+	return s.getDocument(ctx, caseID, id)
+}
+
+// LogName is the record's name for the activity log. It reads trashed records
+// too, so restores and permanent deletes can be named.
+func (s *store) LogName(ctx context.Context, caseID, id string) (string, error) {
+	var name string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT title FROM documents WHERE id = $1 AND case_id = $2`, id, caseID,
+	).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("log name: %w", err)
+	}
+	return name, nil
+}
+
+// IDsForPerson returns the IDs of a person's documents, trashed ones included.
+func (s *store) IDsForPerson(ctx context.Context, caseID, personID string) ([]string, error) {
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx,
+		`SELECT id::text FROM documents WHERE case_id = $1 AND person_id = $2 ORDER BY id`, caseID, personID)
+	if err != nil {
+		return nil, fmt.Errorf("IDsForPerson: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("IDsForPerson: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// IDsForLifeEvent returns the IDs of a life event's documents, trashed ones included.
+func (s *store) IDsForLifeEvent(ctx context.Context, caseID, eventID string) ([]string, error) {
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx,
+		`SELECT id::text FROM documents WHERE case_id = $1 AND life_event_id = $2 ORDER BY id`, caseID, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("IDsForLifeEvent: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("IDsForLifeEvent: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
