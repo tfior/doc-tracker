@@ -33,13 +33,14 @@ type Service struct {
 	store      Store
 	db         *sql.DB
 	log        *activitylog.Service
+	rec        *activitylog.Recorder
 	cases      CaseChecker
 	people     PersonChecker
 	lifeEvents LifeEventChecker
 }
 
 func NewService(store Store, db *sql.DB, log *activitylog.Service, cases CaseChecker, people PersonChecker, lifeEvents LifeEventChecker) *Service {
-	return &Service{store: store, db: db, log: log, cases: cases, people: people, lifeEvents: lifeEvents}
+	return &Service{store: store, db: db, log: log, rec: log.For("document", store.LogName), cases: cases, people: people, lifeEvents: lifeEvents}
 }
 
 func (s *Service) ListDocuments(ctx context.Context, caseID string, page, perPage int) ([]Document, int, error) {
@@ -81,10 +82,7 @@ func (s *Service) CreateDocument(ctx context.Context, caseID, personID, docType,
 		if d, err = s.store.CreateDocument(ctx, caseID, personID, docType, title, input); err != nil {
 			return err
 		}
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "created", EntityType: "document",
-			EntityID: d.ID, EntityName: d.Title,
-		})
+		return s.rec.Record(ctx, caseID, "created", d.ID, nil)
 	})
 	return d, err
 }
@@ -95,25 +93,14 @@ func (s *Service) UpdateDocument(ctx context.Context, caseID, docID string, inpu
 		if _, err := s.store.LockActive(ctx, caseID, docID); err != nil {
 			return err
 		}
-		var err error
+		before, err := s.store.Get(ctx, caseID, docID)
+		if err != nil {
+			return err
+		}
 		if d, err = s.store.UpdateDocument(ctx, caseID, docID, input); err != nil {
 			return err
 		}
-		changes := activitylog.AddString(nil, "title", input.Title)
-		changes = activitylog.AddString(changes, "document_type", input.DocumentType)
-		changes = activitylog.AddBool(changes, "is_verified", input.IsVerified)
-		changes = activitylog.AddNullable(changes, "issuing_authority", input.IssuingAuthority)
-		changes = activitylog.AddNullable(changes, "issue_date", input.IssueDate)
-		changes = activitylog.AddNullable(changes, "recorded_date", input.RecordedDate)
-		changes = activitylog.AddNullable(changes, "recorded_given_name", input.RecordedGivenName)
-		changes = activitylog.AddNullable(changes, "recorded_surname", input.RecordedSurname)
-		changes = activitylog.AddNullable(changes, "recorded_birth_date", input.RecordedBirthDate)
-		changes = activitylog.AddNullable(changes, "recorded_birth_place", input.RecordedBirthPlace)
-		changes = activitylog.AddNullable(changes, "notes", input.Notes)
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "updated", EntityType: "document",
-			EntityID: d.ID, EntityName: d.Title, Changes: changes,
-		})
+		return s.rec.Record(ctx, caseID, "updated", docID, activitylog.Diff(before.logFields(), d.logFields()))
 	})
 	return d, err
 }
@@ -126,10 +113,7 @@ func (s *Service) DeleteDocument(ctx context.Context, caseID, docID string) erro
 		if err := s.store.DeleteDocument(ctx, caseID, docID); err != nil {
 			return err
 		}
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "deleted", EntityType: "document",
-			EntityID: docID, EntityName: docID,
-		})
+		return s.rec.Record(ctx, caseID, "deleted", docID, nil)
 	})
 }
 
@@ -139,15 +123,14 @@ func (s *Service) TransitionStatus(ctx context.Context, caseID, docID string, in
 		if _, err := s.store.LockActive(ctx, caseID, docID); err != nil {
 			return err
 		}
-		var err error
+		before, err := s.store.Get(ctx, caseID, docID)
+		if err != nil {
+			return err
+		}
 		if d, err = s.store.TransitionStatus(ctx, caseID, docID, input); err != nil {
 			return err
 		}
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "updated", EntityType: "document",
-			EntityID: d.ID, EntityName: d.Title,
-			Changes: []activitylog.FieldChange{{Field: input.Phase + "_status", To: input.StatusID}},
-		})
+		return s.rec.Record(ctx, caseID, "updated", docID, activitylog.Diff(before.logFields(), d.logFields()))
 	})
 	return d, err
 }
@@ -162,6 +145,10 @@ func (s *Service) ReassignDocument(ctx context.Context, caseID, docID string, in
 		if err := s.requireParents(ctx, caseID, input.PersonID, input.LifeEventID); err != nil {
 			return err
 		}
+		before, err := s.store.Get(ctx, caseID, docID)
+		if err != nil {
+			return err
+		}
 		// Moving to another person without naming a life event ungroups the
 		// document, so it is never left under the old person's event.
 		if !input.LifeEventID.Set && input.PersonID != currentPerson {
@@ -170,12 +157,7 @@ func (s *Service) ReassignDocument(ctx context.Context, caseID, docID string, in
 		if d, err = s.store.ReassignDocument(ctx, caseID, docID, input); err != nil {
 			return err
 		}
-		changes := []activitylog.FieldChange{{Field: "person_id", To: input.PersonID}}
-		changes = activitylog.AddNullable(changes, "life_event_id", input.LifeEventID)
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "updated", EntityType: "document",
-			EntityID: d.ID, EntityName: d.Title, Changes: changes,
-		})
+		return s.rec.Record(ctx, caseID, "updated", docID, activitylog.Diff(before.logFields(), d.logFields()))
 	})
 	return d, err
 }
@@ -195,10 +177,8 @@ func (s *Service) MoveEventDocuments(ctx context.Context, caseID, eventID, perso
 			return err
 		}
 		for _, m := range moved {
-			if err := s.log.Insert(ctx, activitylog.InsertParams{
-				CaseID: caseID, Action: "updated", EntityType: "document",
-				EntityID: m.ID, EntityName: m.Title,
-				Changes: []activitylog.FieldChange{{Field: "person_id", To: personID}},
+			if err := s.rec.Named(ctx, caseID, "updated", m.ID, m.Title, []activitylog.FieldChange{
+				{Field: "person_id", From: m.FromPersonID, To: personID},
 			}); err != nil {
 				return err
 			}
@@ -227,13 +207,53 @@ func (s *Service) Restore(ctx context.Context, caseID, docID string) error {
 				return err
 			}
 		}
-		return s.store.Restore(ctx, caseID, docID)
+		if err := s.store.Restore(ctx, caseID, docID); err != nil {
+			return err
+		}
+		return s.rec.Record(ctx, caseID, "restored", docID, nil)
 	})
 }
 
 // PermanentDelete deletes a trashed document. Called by the trash module.
 func (s *Service) PermanentDelete(ctx context.Context, caseID, docID string) error {
 	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
-		return s.store.PermanentDelete(ctx, caseID, docID)
+		name, err := s.store.LogName(ctx, caseID, docID)
+		if err != nil {
+			return err
+		}
+		if err := s.store.PermanentDelete(ctx, caseID, docID); err != nil {
+			return err
+		}
+		return s.rec.Named(ctx, caseID, "permanently_deleted", docID, name, nil)
 	})
+}
+
+// LogDeletedWithPerson writes a "permanently_deleted" entry for each of a person's documents. The trash
+// module calls it inside the permanent delete, before the rows are removed.
+func (s *Service) LogDeletedWithPerson(ctx context.Context, caseID, personID string) error {
+	ids, err := s.store.IDsForPerson(ctx, caseID, personID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.rec.Record(ctx, caseID, "permanently_deleted", id, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// LogDeletedWithLifeEvent writes a "permanently_deleted" entry for each of a life event's documents. The trash
+// module calls it inside the permanent delete, before the rows are removed.
+func (s *Service) LogDeletedWithLifeEvent(ctx context.Context, caseID, eventID string) error {
+	ids, err := s.store.IDsForLifeEvent(ctx, caseID, eventID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.rec.Record(ctx, caseID, "permanently_deleted", id, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -4,7 +4,11 @@
 
 package cases
 
-import "time"
+import (
+	"time"
+
+	"github.com/tfior/doc-tracker/internal/activitylog"
+)
 
 type Case struct {
 	ID                  string    `json:"id"`
@@ -27,4 +31,9 @@ type ClaimLineSummary struct {
 type CaseDetail struct {
 	Case
 	ClaimLineSummary ClaimLineSummary `json:"claim_line_summary"`
+}
+
+// logFields is what the activity log compares when a case changes.
+func (c *Case) logFields() activitylog.Fields {
+	return activitylog.Fields{"title": c.Title, "status": c.Status}
 }

@@ -4,7 +4,11 @@
 
 package claimlines
 
-import "time"
+import (
+	"time"
+
+	"github.com/tfior/doc-tracker/internal/activitylog"
+)
 
 type ClaimLine struct {
 	ID           string    `json:"id"`
@@ -14,4 +18,9 @@ type ClaimLine struct {
 	Notes        *string   `json:"notes"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// logFields is what the activity log compares when a claim line changes.
+func (cl *ClaimLine) logFields() activitylog.Fields {
+	return activitylog.Fields{"status": cl.Status, "notes": activitylog.Value(cl.Notes)}
 }

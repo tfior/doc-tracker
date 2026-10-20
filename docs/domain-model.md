@@ -456,7 +456,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 64. ActivityLog entries are append-only. They are never updated. They are removed only when their Case is permanently deleted.
 65. `ActivityLog.entity_name` is captured at the time of the action and is not updated if the entity is later renamed or deleted.
 66. `ActivityLog.changes` stores field-level diffs for `updated` actions only, with the old and new value of each field whose value changed. It is null for all other actions.
-67. Activity log entries are written for all write operations on case-scoped entities (cases, people, person relationships, life events, documents, file attachments, claim lines, applications), including archive, restore, and permanent delete.
+67. Activity log entries are written for all write operations on case-scoped entities (cases, people, person relationships, life events, documents, file attachments, claim lines, applications), including archive, restore, and permanent delete. Permanently deleting a record also logs a `permanently_deleted` entry for each record deleted with it.
 68. An activity log entry is written in the same database transaction as the change it records. If either fails, neither is saved.
 
 ### Soft-delete and Trash

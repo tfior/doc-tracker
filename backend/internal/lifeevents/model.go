@@ -7,6 +7,7 @@ package lifeevents
 import (
 	"time"
 
+	"github.com/tfior/doc-tracker/internal/activitylog"
 	"github.com/tfior/doc-tracker/platform"
 )
 
@@ -34,4 +35,18 @@ type UpdateLifeEventInput struct {
 	SpouseBirthDate  platform.NullString
 	SpouseBirthPlace platform.NullString
 	Notes            platform.NullString
+}
+
+// logFields is what the activity log compares when a life event changes.
+func (le *LifeEvent) logFields() activitylog.Fields {
+	return activitylog.Fields{
+		"person_id":          le.PersonID,
+		"event_type":         le.EventType,
+		"event_date":         activitylog.Value(le.EventDate),
+		"event_place":        activitylog.Value(le.EventPlace),
+		"spouse_name":        activitylog.Value(le.SpouseName),
+		"spouse_birth_date":  activitylog.Value(le.SpouseBirthDate),
+		"spouse_birth_place": activitylog.Value(le.SpouseBirthPlace),
+		"notes":              activitylog.Value(le.Notes),
+	}
 }

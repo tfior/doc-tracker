@@ -7,12 +7,15 @@ package trash
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/tfior/doc-tracker/platform"
 )
 
 type Store interface {
+	CaseDeletionRecord(ctx context.Context, caseID string) (*CaseDeletionRecord, error)
+	InsertCaseDeletionRecord(ctx context.Context, r *CaseDeletionRecord) error
 	GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, error)
 	GetGlobalTrash(ctx context.Context) (*GlobalTrash, error)
 }
@@ -241,4 +244,58 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 	}
 
 	return t, nil
+}
+
+// CaseDeletionRecord builds the deletion record for a trashed case: its title
+// and how many people, life events, documents and files would go with it,
+// trashed ones included. It returns ErrNotFound if the case is not in the
+// trash. Reading other modules' tables is allowed; nothing is written here.
+func (s *store) CaseDeletionRecord(ctx context.Context, caseID string) (*CaseDeletionRecord, error) {
+	conn := platform.Conn(ctx, s.db)
+	// Lock everything about to be deleted, so the counts cannot change before
+	// the deletion commits: a concurrent permanent delete of a record in this
+	// case waits until this one finishes.
+	for _, q := range []string{
+		`SELECT id FROM people WHERE case_id = $1 FOR UPDATE`,
+		`SELECT id FROM life_events WHERE case_id = $1 FOR UPDATE`,
+		`SELECT id FROM documents WHERE case_id = $1 FOR UPDATE`,
+		`SELECT fa.id FROM file_attachments fa JOIN documents d ON d.id = fa.document_id WHERE d.case_id = $1 FOR UPDATE OF fa`,
+	} {
+		if _, err := conn.ExecContext(ctx, q, caseID); err != nil {
+			return nil, fmt.Errorf("lock case contents: %w", err)
+		}
+	}
+	r := &CaseDeletionRecord{CaseID: caseID}
+	err := conn.QueryRowContext(ctx, `
+		SELECT c.title,
+			(SELECT COUNT(*) FROM people WHERE case_id = c.id),
+			(SELECT COUNT(*) FROM life_events WHERE case_id = c.id),
+			(SELECT COUNT(*) FROM documents WHERE case_id = c.id),
+			(SELECT COUNT(*) FROM file_attachments fa JOIN documents d ON d.id = fa.document_id WHERE d.case_id = c.id)
+		FROM cases c
+		WHERE c.id = $1 AND c.deleted_at IS NOT NULL`, caseID,
+	).Scan(&r.CaseTitle, &r.PeopleCount, &r.LifeEventsCount, &r.DocumentsCount, &r.FilesCount)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("build case deletion record: %w", err)
+	}
+	return r, nil
+}
+
+func (s *store) InsertCaseDeletionRecord(ctx context.Context, r *CaseDeletionRecord) error {
+	var deletedBy sql.NullString
+	if r.DeletedBy != "" {
+		deletedBy = sql.NullString{String: r.DeletedBy, Valid: true}
+	}
+	_, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
+		INSERT INTO case_deletion_records
+			(case_id, case_title, deleted_by, people_count, life_events_count, documents_count, files_count)
+		VALUES ($1, $2, $3::uuid, $4, $5, $6, $7)`,
+		r.CaseID, r.CaseTitle, deletedBy, r.PeopleCount, r.LifeEventsCount, r.DocumentsCount, r.FilesCount)
+	if err != nil {
+		return fmt.Errorf("insert case deletion record: %w", err)
+	}
+	return nil
 }

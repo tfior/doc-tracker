@@ -71,3 +71,15 @@ type GlobalTrash struct {
 	Documents  []TrashedDocument  `json:"documents"`
 	ClaimLines []TrashedClaimLine `json:"claim_lines"`
 }
+
+// CaseDeletionRecord is the permanent record that a case was permanently
+// deleted. It identifies the case and nothing more.
+type CaseDeletionRecord struct {
+	CaseID          string
+	CaseTitle       string
+	DeletedBy       string // empty when deleted by the automatic purge
+	PeopleCount     int
+	LifeEventsCount int
+	DocumentsCount  int
+	FilesCount      int
+}

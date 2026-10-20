@@ -34,13 +34,14 @@ type Service struct {
 	store     Store
 	db        *sql.DB
 	log       *activitylog.Service
+	rec       *activitylog.Recorder
 	cases     CaseChecker
 	people    PersonChecker
 	documents DocumentMover
 }
 
 func NewService(store Store, db *sql.DB, log *activitylog.Service, cases CaseChecker, people PersonChecker) *Service {
-	return &Service{store: store, db: db, log: log, cases: cases, people: people}
+	return &Service{store: store, db: db, log: log, rec: log.For("life_event", store.LogName), cases: cases, people: people}
 }
 
 // SetDocumentMover supplies the documents module. It is set after construction
@@ -73,10 +74,7 @@ func (s *Service) CreateLifeEvent(ctx context.Context, caseID, personID, eventTy
 		if le, err = s.store.CreateLifeEvent(ctx, caseID, personID, eventType, input); err != nil {
 			return err
 		}
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "created", EntityType: "life_event",
-			EntityID: le.ID, EntityName: le.EventType + " event",
-		})
+		return s.rec.Record(ctx, caseID, "created", le.ID, nil)
 	})
 	return le, err
 }
@@ -87,21 +85,14 @@ func (s *Service) UpdateLifeEvent(ctx context.Context, caseID, eventID string, i
 		if _, err := s.store.LockActive(ctx, caseID, eventID); err != nil {
 			return err
 		}
-		var err error
+		before, err := s.store.Get(ctx, caseID, eventID)
+		if err != nil {
+			return err
+		}
 		if le, err = s.store.UpdateLifeEvent(ctx, caseID, eventID, input); err != nil {
 			return err
 		}
-		changes := activitylog.AddString(nil, "event_type", input.EventType)
-		changes = activitylog.AddNullable(changes, "event_date", input.EventDate)
-		changes = activitylog.AddNullable(changes, "event_place", input.EventPlace)
-		changes = activitylog.AddNullable(changes, "spouse_name", input.SpouseName)
-		changes = activitylog.AddNullable(changes, "spouse_birth_date", input.SpouseBirthDate)
-		changes = activitylog.AddNullable(changes, "spouse_birth_place", input.SpouseBirthPlace)
-		changes = activitylog.AddNullable(changes, "notes", input.Notes)
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "updated", EntityType: "life_event",
-			EntityID: le.ID, EntityName: le.EventType + " event", Changes: changes,
-		})
+		return s.rec.Record(ctx, caseID, "updated", eventID, activitylog.Diff(before.logFields(), le.logFields()))
 	})
 	return le, err
 }
@@ -114,10 +105,7 @@ func (s *Service) DeleteLifeEvent(ctx context.Context, caseID, eventID string) e
 		if err := s.store.DeleteLifeEvent(ctx, caseID, eventID); err != nil {
 			return err
 		}
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "deleted", EntityType: "life_event",
-			EntityID: eventID, EntityName: eventID,
-		})
+		return s.rec.Record(ctx, caseID, "deleted", eventID, nil)
 	})
 }
 
@@ -136,18 +124,17 @@ func (s *Service) ReassignLifeEvent(ctx context.Context, caseID, eventID, person
 		if err := s.people.RequireActive(ctx, caseID, personID); err != nil {
 			return platform.MapNotFound(err, ErrNotFound)
 		}
-		var err error
+		before, err := s.store.Get(ctx, caseID, eventID)
+		if err != nil {
+			return err
+		}
 		if le, err = s.store.ReassignLifeEvent(ctx, caseID, eventID, personID); err != nil {
 			return err
 		}
 		if err := s.documents.MoveEventDocuments(ctx, caseID, eventID, personID); err != nil {
 			return err
 		}
-		return s.log.Insert(ctx, activitylog.InsertParams{
-			CaseID: caseID, Action: "updated", EntityType: "life_event",
-			EntityID: le.ID, EntityName: le.EventType + " event",
-			Changes: []activitylog.FieldChange{{Field: "person_id", To: personID}},
-		})
+		return s.rec.Record(ctx, caseID, "updated", eventID, activitylog.Diff(before.logFields(), le.logFields()))
 	})
 	return le, err
 }
@@ -164,7 +151,10 @@ func (s *Service) Restore(ctx context.Context, caseID, eventID string) error {
 		} else if err != nil {
 			return err
 		}
-		return s.store.Restore(ctx, caseID, eventID)
+		if err := s.store.Restore(ctx, caseID, eventID); err != nil {
+			return err
+		}
+		return s.rec.Record(ctx, caseID, "restored", eventID, nil)
 	})
 }
 
@@ -177,6 +167,28 @@ func (s *Service) PermanentDelete(ctx context.Context, caseID, eventID string) e
 		if err := s.documents.LockEventDocuments(ctx, caseID, eventID); err != nil {
 			return err
 		}
-		return s.store.PermanentDelete(ctx, caseID, eventID)
+		name, err := s.store.LogName(ctx, caseID, eventID)
+		if err != nil {
+			return err
+		}
+		if err := s.store.PermanentDelete(ctx, caseID, eventID); err != nil {
+			return err
+		}
+		return s.rec.Named(ctx, caseID, "permanently_deleted", eventID, name, nil)
 	})
+}
+
+// LogDeletedWithPerson writes a "permanently_deleted" entry for each of a person's life events. The trash
+// module calls it inside the permanent delete, before the rows are removed.
+func (s *Service) LogDeletedWithPerson(ctx context.Context, caseID, personID string) error {
+	ids, err := s.store.IDsForPerson(ctx, caseID, personID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.rec.Record(ctx, caseID, "permanently_deleted", id, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -79,10 +79,18 @@ func OpenTestDB(t *testing.T) *sql.DB {
 	}
 	m.Close()
 
-	// Remove a log-rejecting trigger left behind if an earlier run was killed
-	// before its cleanup ran (see FailActivityLogWrites).
-	_, _ = db.Exec(`DROP TRIGGER IF EXISTS test_reject_activity_log ON activity_logs`)
-	_, _ = db.Exec(`DROP FUNCTION IF EXISTS test_reject_activity_log()`)
+	// Remove rejecting triggers left behind if an earlier run was killed before
+	// its cleanup ran (see FailInserts).
+	_, _ = db.Exec(`
+		DO $$
+		DECLARE r record;
+		BEGIN
+			FOR r IN SELECT tgname, tgrelid::regclass AS tbl FROM pg_trigger WHERE tgname LIKE 'test_reject_%' LOOP
+				EXECUTE format('DROP TRIGGER %I ON %s', r.tgname, r.tbl);
+			END LOOP;
+		END $$`)
+	_, _ = db.Exec(`DROP FUNCTION IF EXISTS test_reject_insert() CASCADE`)
+	_, _ = db.Exec(`DROP FUNCTION IF EXISTS test_reject_activity_log() CASCADE`)
 
 	t.Cleanup(func() { db.Close() })
 	return db

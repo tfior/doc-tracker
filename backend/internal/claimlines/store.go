@@ -24,6 +24,9 @@ var validStatuses = map[string]bool{
 }
 
 type Store interface {
+	IDsRootedAt(ctx context.Context, caseID, personID string) ([]string, error)
+	Get(ctx context.Context, caseID, id string) (*ClaimLine, error)
+	LogName(ctx context.Context, caseID, id string) (string, error)
 	LockActive(ctx context.Context, caseID, id string) error
 	ListClaimLines(ctx context.Context, caseID string, page, perPage int) ([]ClaimLine, int, error)
 	CreateClaimLine(ctx context.Context, caseID, rootPersonID, status string, notes platform.NullString) (*ClaimLine, error)
@@ -239,4 +242,46 @@ func (s *store) LockActive(ctx context.Context, caseID, id string) error {
 		return fmt.Errorf("lock claim_lines: %w", err)
 	}
 	return s.RequireActive(ctx, caseID, id)
+}
+
+// Get returns an active record, for the "before" side of an update's log entry.
+func (s *store) Get(ctx context.Context, caseID, id string) (*ClaimLine, error) {
+	return s.getClaimLine(ctx, caseID, id)
+}
+
+// LogName is the record's name for the activity log. It reads trashed records
+// too, so restores and permanent deletes can be named.
+func (s *store) LogName(ctx context.Context, caseID, id string) (string, error) {
+	var root string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT p.first_name || ' ' || p.last_name
+		FROM claim_lines cl JOIN people p ON p.id = cl.root_person_id
+		WHERE cl.id = $1 AND cl.case_id = $2`, id, caseID,
+	).Scan(&root)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("log name: %w", err)
+	}
+	return "Claim line through " + root, nil
+}
+
+// IDsRootedAt returns the IDs of the claim lines rooted at a person, trashed ones included.
+func (s *store) IDsRootedAt(ctx context.Context, caseID, personID string) ([]string, error) {
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx,
+		`SELECT id::text FROM claim_lines WHERE case_id = $1 AND root_person_id = $2 ORDER BY id`, caseID, personID)
+	if err != nil {
+		return nil, fmt.Errorf("IDsRootedAt: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("IDsRootedAt: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

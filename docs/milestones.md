@@ -170,11 +170,11 @@ Defects from the review
 - [x] An active check locks the row it checks until the write commits, so a parent trashed at the same moment cannot receive a new child
 
 Activity log
-- [ ] `changes` holds the old and new value of each field that actually changed
-- [ ] Human-readable entity names everywhere, including on delete
-- [ ] `restored` and `permanently_deleted` actions; restore and permanent delete are logged
-- [ ] CaseDeletionRecord written when a case is permanently deleted
-- [ ] Tests assert on activity log rows
+- [x] `changes` holds the old and new value of each field that actually changed
+- [x] Human-readable entity names everywhere, including on delete
+- [x] `restored` and `permanently_deleted` actions; restore and permanent delete are logged
+- [x] CaseDeletionRecord written when a case is permanently deleted
+- [x] Tests assert on activity log rows
 
 API
 - [ ] `version` on Case, Person, LifeEvent, Document, ClaimLine; a stale write is refused with `conflict`

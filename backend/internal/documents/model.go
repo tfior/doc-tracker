@@ -7,6 +7,7 @@ package documents
 import (
 	"time"
 
+	"github.com/tfior/doc-tracker/internal/activitylog"
 	"github.com/tfior/doc-tracker/platform"
 )
 
@@ -81,6 +82,31 @@ type Document struct {
 // MovedDocument identifies a document whose person changed because its life
 // event moved to another person.
 type MovedDocument struct {
-	ID    string
-	Title string
+	ID           string
+	Title        string
+	FromPersonID string
+}
+
+// logFields is what the activity log compares when a document changes. Phase
+// statuses are logged by label, which is what a reader needs.
+func (d *Document) logFields() activitylog.Fields {
+	return activitylog.Fields{
+		"person_id":            d.PersonID,
+		"life_event_id":        activitylog.Value(d.LifeEventID),
+		"document_type":        d.DocumentType,
+		"title":                d.Title,
+		"issuing_authority":    activitylog.Value(d.IssuingAuthority),
+		"issue_date":           activitylog.Value(d.IssueDate),
+		"recorded_date":        activitylog.Value(d.RecordedDate),
+		"recorded_given_name":  activitylog.Value(d.RecordedGivenName),
+		"recorded_surname":     activitylog.Value(d.RecordedSurname),
+		"recorded_birth_date":  activitylog.Value(d.RecordedBirthDate),
+		"recorded_birth_place": activitylog.Value(d.RecordedBirthPlace),
+		"notes":                activitylog.Value(d.Notes),
+		"is_verified":          d.IsVerified,
+		"official_copy_status": d.OfficialCopyStatus.Label,
+		"amendment_status":     d.AmendmentStatus.Label,
+		"apostille_status":     d.ApostilleStatus.Label,
+		"translation_status":   d.TranslationStatus.Label,
+	}
 }
