@@ -36,10 +36,11 @@ func NewHandler(db *sql.DB) http.Handler {
 	actlogSvc := activitylog.NewService(activitylog.NewStore(db), auth.UserIDFromContext)
 
 	casesSvc := cases.NewService(cases.NewStore(db), db, actlogSvc)
-	peopleSvc := people.NewService(people.NewStore(db), db, actlogSvc)
-	lifeEventsSvc := lifeevents.NewService(lifeevents.NewStore(db), db, actlogSvc, peopleSvc)
-	documentsSvc := documents.NewService(documents.NewStore(db), db, actlogSvc, peopleSvc, lifeEventsSvc)
-	claimLinesSvc := claimlines.NewService(claimlines.NewStore(db), db, actlogSvc, peopleSvc)
+	peopleSvc := people.NewService(people.NewStore(db), db, actlogSvc, casesSvc)
+	lifeEventsSvc := lifeevents.NewService(lifeevents.NewStore(db), db, actlogSvc, casesSvc, peopleSvc)
+	documentsSvc := documents.NewService(documents.NewStore(db), db, actlogSvc, casesSvc, peopleSvc, lifeEventsSvc)
+	lifeEventsSvc.SetDocumentMover(documentsSvc)
+	claimLinesSvc := claimlines.NewService(claimlines.NewStore(db), db, actlogSvc, casesSvc, peopleSvc)
 	trashSvc := trash.NewService(trash.NewStore(db), db, trash.Owners{
 		Cases:      casesSvc,
 		People:     peopleSvc,

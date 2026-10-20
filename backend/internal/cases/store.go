@@ -21,6 +21,8 @@ type Store interface {
 	CreateCase(ctx context.Context, title string) (*Case, error)
 	UpdateCase(ctx context.Context, caseID string, title *string, status *string) (*Case, error)
 	DeleteCase(ctx context.Context, caseID string) error
+	RequireActive(ctx context.Context, caseID string) error
+	LockActive(ctx context.Context, caseID string) error
 	RestoreCase(ctx context.Context, caseID string) error
 	PermanentDeleteCase(ctx context.Context, caseID string) error
 }
@@ -44,7 +46,7 @@ func (s *store) ListCases(ctx context.Context, page, perPage int) ([]Case, int, 
 		SELECT id::text, title, status::text, primary_root_person_id::text, created_at, updated_at
 		FROM cases
 		WHERE deleted_at IS NULL
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, id DESC
 		LIMIT $1 OFFSET $2`,
 		perPage, offset)
 	if err != nil {
@@ -89,7 +91,8 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'ineligible')        AS cl_ineligible,
 			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'eligible')          AS cl_eligible
 		FROM cases c
-		LEFT JOIN claim_lines cl ON cl.case_id = c.id
+		LEFT JOIN active_claim_lines acl ON acl.case_id = c.id
+		LEFT JOIN claim_lines cl ON cl.id = acl.id
 		WHERE c.id = $1 AND c.deleted_at IS NULL
 		GROUP BY c.id`,
 		caseID,
@@ -191,4 +194,38 @@ func (s *store) PermanentDeleteCase(ctx context.Context, caseID string) error {
 		return fmt.Errorf("permanent delete case: %w", err)
 	}
 	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+// RequireActive returns ErrNotFound unless the case exists and is not in the
+// trash. It locks the case until the transaction ends, so the case cannot be
+// trashed while a write that depends on it is in progress.
+func (s *store) RequireActive(ctx context.Context, caseID string) error {
+	var id string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT id::text FROM active_cases WHERE id = $1 FOR SHARE`, caseID,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("verify case: %w", err)
+	}
+	return nil
+}
+
+// LockActive takes an exclusive lock on a case about to be changed, then checks
+// that it is active. Taking the exclusive lock first means simultaneous writes
+// to the same case wait for each other instead of deadlocking.
+func (s *store) LockActive(ctx context.Context, caseID string) error {
+	if err := lockRow(ctx, s.db, `SELECT id FROM cases WHERE id = $1 FOR NO KEY UPDATE`, caseID); err != nil {
+		return err
+	}
+	return s.RequireActive(ctx, caseID)
+}
+
+func lockRow(ctx context.Context, db *sql.DB, query string, args ...any) error {
+	if _, err := platform.Conn(ctx, db).ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("lock row: %w", err)
+	}
+	return nil
 }

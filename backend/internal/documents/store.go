@@ -21,6 +21,7 @@ var validPhases = map[string]bool{
 }
 
 type Store interface {
+	LockActive(ctx context.Context, caseID, id string) (personID string, err error)
 	ListDocuments(ctx context.Context, caseID string, page, perPage int) ([]Document, int, error)
 	ListDocumentStatuses(ctx context.Context, phase string) ([]DocumentStatus, error)
 	CreateDocument(ctx context.Context, caseID, personID, docType, title string, input UpdateDocumentInput) (*Document, error)
@@ -28,6 +29,10 @@ type Store interface {
 	DeleteDocument(ctx context.Context, caseID, docID string) error
 	TransitionStatus(ctx context.Context, caseID, docID string, input TransitionStatusInput) (*Document, error)
 	ReassignDocument(ctx context.Context, caseID, docID string, input ReassignDocumentInput) (*Document, error)
+	RequireActive(ctx context.Context, caseID, docID string) (personID string, err error)
+	TrashedParents(ctx context.Context, caseID, docID string) (personID string, lifeEventID *string, err error)
+	MoveEventDocuments(ctx context.Context, caseID, eventID, personID string) ([]MovedDocument, error)
+	LockEventDocuments(ctx context.Context, caseID, eventID string) error
 	Restore(ctx context.Context, caseID, id string) error
 	PermanentDelete(ctx context.Context, caseID, id string) error
 }
@@ -43,7 +48,7 @@ func NewStore(db *sql.DB) Store {
 func (s *store) ListDocuments(ctx context.Context, caseID string, page, perPage int) ([]Document, int, error) {
 	var total int
 	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM documents WHERE case_id = $1 AND deleted_at IS NULL`, caseID,
+		`SELECT COUNT(*) FROM active_documents WHERE case_id = $1`, caseID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count documents: %w", err)
 	}
@@ -67,8 +72,8 @@ func (s *store) ListDocuments(ctx context.Context, caseID string, page, perPage 
 		JOIN document_statuses am ON am.id = d.amendment_status_id
 		JOIN document_statuses ap ON ap.id = d.apostille_status_id
 		JOIN document_statuses tr ON tr.id = d.translation_status_id
-		WHERE d.case_id = $1 AND d.deleted_at IS NULL
-		ORDER BY d.created_at ASC
+		WHERE d.id IN (SELECT id FROM active_documents WHERE case_id = $1)
+		ORDER BY d.created_at ASC, d.id ASC
 		LIMIT $2 OFFSET $3`,
 		caseID, perPage, offset)
 	if err != nil {
@@ -452,4 +457,110 @@ func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
 		return fmt.Errorf("permanent delete document: %w", err)
 	}
 	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+// RequireActive returns the document's person, or ErrNotFound unless the
+// document is active: not in the trash and not beneath a trashed life event,
+// person or case. It locks the document, its person and its case until the
+// transaction ends.
+func (s *store) RequireActive(ctx context.Context, caseID, docID string) (string, error) {
+	conn := platform.Conn(ctx, s.db)
+	var personID string
+	var lifeEventID sql.NullString
+	err := conn.QueryRowContext(ctx,
+		`SELECT person_id::text, life_event_id::text FROM active_documents
+		 WHERE id = $1 AND case_id = $2 FOR SHARE`,
+		docID, caseID,
+	).Scan(&personID, &lifeEventID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("verify document: %w", err)
+	}
+	// The view checks the life event without locking it, so lock it here: the
+	// event cannot then be trashed while this document is being changed.
+	if lifeEventID.Valid {
+		var id string
+		err := conn.QueryRowContext(ctx,
+			`SELECT id::text FROM life_events WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
+			lifeEventID.String,
+		).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		if err != nil {
+			return "", fmt.Errorf("verify document's life event: %w", err)
+		}
+	}
+	return personID, nil
+}
+
+// TrashedParents returns the person and life event of a document that is in
+// the trash, or ErrNotFound if the document is not in the trash.
+func (s *store) TrashedParents(ctx context.Context, caseID, docID string) (string, *string, error) {
+	var personID string
+	var lifeEventID sql.NullString
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT person_id::text, life_event_id::text FROM documents
+		 WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		docID, caseID,
+	).Scan(&personID, &lifeEventID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil, ErrNotFound
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("get trashed document: %w", err)
+	}
+	var ev *string
+	setString(&ev, lifeEventID)
+	return personID, ev, nil
+}
+
+// MoveEventDocuments gives every document under a life event, including any in
+// the trash, the event's new person.
+func (s *store) MoveEventDocuments(ctx context.Context, caseID, eventID, personID string) ([]MovedDocument, error) {
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
+		UPDATE documents SET person_id = $3, updated_at = NOW()
+		WHERE life_event_id = $1 AND case_id = $2 AND person_id <> $3
+		RETURNING id::text, title`,
+		eventID, caseID, personID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("move event documents: %w", err)
+	}
+	defer rows.Close()
+	moved := []MovedDocument{}
+	for rows.Next() {
+		var m MovedDocument
+		if err := rows.Scan(&m.ID, &m.Title); err != nil {
+			return nil, fmt.Errorf("scan moved document: %w", err)
+		}
+		moved = append(moved, m)
+	}
+	return moved, rows.Err()
+}
+
+// LockActive takes an exclusive lock on a row about to be changed, then checks
+// that it is active. Taking the exclusive lock first means simultaneous writes
+// to the same row wait for each other instead of deadlocking.
+func (s *store) LockActive(ctx context.Context, caseID, id string) (string, error) {
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`SELECT id FROM documents WHERE id = $1 FOR NO KEY UPDATE`, id); err != nil {
+		return "", fmt.Errorf("lock documents: %w", err)
+	}
+	return s.RequireActive(ctx, caseID, id)
+}
+
+// LockEventDocuments takes an exclusive lock on every document under a life
+// event. Anything that changes both an event and its documents locks the
+// documents first, the same order a document write uses, so the two cannot
+// deadlock.
+func (s *store) LockEventDocuments(ctx context.Context, caseID, eventID string) error {
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`SELECT id FROM documents WHERE life_event_id = $1 AND case_id = $2 ORDER BY id FOR NO KEY UPDATE`,
+		eventID, caseID); err != nil {
+		return fmt.Errorf("lock event documents: %w", err)
+	}
+	return nil
 }

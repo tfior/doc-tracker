@@ -36,6 +36,10 @@ func (h *Handler) listClaimLines(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, total, err := h.svc.ListClaimLines(r.Context(), caseID, page, perPage)
+	if errors.Is(err, ErrNotFound) {
+		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
+		return
+	}
 	if err != nil {
 		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
 		return
@@ -74,6 +78,9 @@ func (h *Handler) createClaimLine(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cl, err := h.svc.CreateClaimLine(r.Context(), caseID, body.RootPersonID, status, (body.Notes))
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
 		return
@@ -104,6 +111,9 @@ func (h *Handler) updateClaimLine(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cl, err := h.svc.UpdateClaimLine(r.Context(), caseID, lineID, body.Status, (body.Notes))
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Claim line not found")
 		return
@@ -121,6 +131,9 @@ func (h *Handler) deleteClaimLine(w http.ResponseWriter, r *http.Request) {
 	lineID := r.PathValue("lineId")
 
 	err := h.svc.DeleteClaimLine(r.Context(), caseID, lineID)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Claim line not found")
 		return

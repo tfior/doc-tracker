@@ -24,10 +24,13 @@ var validStatuses = map[string]bool{
 }
 
 type Store interface {
+	LockActive(ctx context.Context, caseID, id string) error
 	ListClaimLines(ctx context.Context, caseID string, page, perPage int) ([]ClaimLine, int, error)
 	CreateClaimLine(ctx context.Context, caseID, rootPersonID, status string, notes platform.NullString) (*ClaimLine, error)
 	UpdateClaimLine(ctx context.Context, caseID, lineID string, status *string, notes platform.NullString) (*ClaimLine, error)
 	DeleteClaimLine(ctx context.Context, caseID, lineID string) error
+	RequireActive(ctx context.Context, caseID, lineID string) error
+	TrashedRootPersonID(ctx context.Context, caseID, lineID string) (string, error)
 	Restore(ctx context.Context, caseID, id string) error
 	PermanentDelete(ctx context.Context, caseID, id string) error
 }
@@ -43,7 +46,7 @@ func NewStore(db *sql.DB) Store {
 func (s *store) ListClaimLines(ctx context.Context, caseID string, page, perPage int) ([]ClaimLine, int, error) {
 	var total int
 	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM claim_lines WHERE case_id = $1 AND deleted_at IS NULL`, caseID,
+		`SELECT COUNT(*) FROM active_claim_lines WHERE case_id = $1`, caseID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count claim lines: %w", err)
 	}
@@ -52,8 +55,8 @@ func (s *store) ListClaimLines(ctx context.Context, caseID string, page, perPage
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT id::text, case_id::text, root_person_id::text, status::text, notes, created_at, updated_at
 		FROM claim_lines
-		WHERE case_id = $1 AND deleted_at IS NULL
-		ORDER BY created_at ASC
+		WHERE id IN (SELECT id FROM active_claim_lines WHERE case_id = $1)
+		ORDER BY created_at ASC, id ASC
 		LIMIT $2 OFFSET $3`,
 		caseID, perPage, offset)
 	if err != nil {
@@ -190,4 +193,50 @@ func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
 		return fmt.Errorf("permanent delete claim line: %w", err)
 	}
 	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+// RequireActive returns ErrNotFound unless the claim line is active: not in
+// the trash and its root ancestor active. It locks the line, its root ancestor
+// and its case until the transaction ends.
+func (s *store) RequireActive(ctx context.Context, caseID, lineID string) error {
+	var id string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT id::text FROM active_claim_lines WHERE id = $1 AND case_id = $2 FOR SHARE`,
+		lineID, caseID,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("verify claim line: %w", err)
+	}
+	return nil
+}
+
+// TrashedRootPersonID returns the root ancestor of a claim line that is in the
+// trash, or ErrNotFound if the line is not in the trash.
+func (s *store) TrashedRootPersonID(ctx context.Context, caseID, lineID string) (string, error) {
+	var personID string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT root_person_id::text FROM claim_lines WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		lineID, caseID,
+	).Scan(&personID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("get trashed claim line: %w", err)
+	}
+	return personID, nil
+}
+
+// LockActive takes an exclusive lock on a row about to be changed, then checks
+// that it is active. Taking the exclusive lock first means simultaneous writes
+// to the same row wait for each other instead of deadlocking.
+func (s *store) LockActive(ctx context.Context, caseID, id string) error {
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`SELECT id FROM claim_lines WHERE id = $1 FOR NO KEY UPDATE`, id); err != nil {
+		return fmt.Errorf("lock claim_lines: %w", err)
+	}
+	return s.RequireActive(ctx, caseID, id)
 }

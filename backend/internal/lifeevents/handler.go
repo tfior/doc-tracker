@@ -42,6 +42,10 @@ func (h *Handler) listLifeEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, total, err := h.svc.ListLifeEvents(r.Context(), caseID, page, perPage)
+	if errors.Is(err, ErrNotFound) {
+		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
+		return
+	}
 	if err != nil {
 		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
 		return
@@ -95,6 +99,9 @@ func (h *Handler) createLifeEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	le, err := h.svc.CreateLifeEvent(r.Context(), caseID, body.PersonID, body.EventType, input)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
 		return
@@ -140,6 +147,9 @@ func (h *Handler) updateLifeEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	le, err := h.svc.UpdateLifeEvent(r.Context(), caseID, eventID, input)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Life event not found")
 		return
@@ -157,6 +167,9 @@ func (h *Handler) deleteLifeEvent(w http.ResponseWriter, r *http.Request) {
 	eventID := r.PathValue("eventId")
 
 	err := h.svc.DeleteLifeEvent(r.Context(), caseID, eventID)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Life event not found")
 		return
@@ -186,6 +199,9 @@ func (h *Handler) reassignLifeEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	le, err := h.svc.ReassignLifeEvent(r.Context(), caseID, eventID, body.PersonID)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Life event or person not found")
 		return

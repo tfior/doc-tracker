@@ -77,3 +77,10 @@ type Document struct {
 	CreatedAt          time.Time   `json:"created_at"`
 	UpdatedAt          time.Time   `json:"updated_at"`
 }
+
+// MovedDocument identifies a document whose person changed because its life
+// event moved to another person.
+type MovedDocument struct {
+	ID    string
+	Title string
+}

@@ -16,7 +16,6 @@ import (
 
 var (
 	ErrNotFound = fmt.Errorf("person %w", platform.ErrNotFound)
-	ErrConflict = errors.New("conflict")
 )
 
 const (
@@ -25,13 +24,16 @@ const (
 )
 
 type Store interface {
+	LockActive(ctx context.Context, caseID, id string) error
 	ListPeople(ctx context.Context, caseID string, page, perPage int) ([]Person, int, error)
 	CreatePerson(ctx context.Context, caseID, firstName, lastName string, input UpdatePersonInput) (*Person, error)
 	UpdatePerson(ctx context.Context, caseID, personID string, input UpdatePersonInput) (*Person, error)
 	DeletePerson(ctx context.Context, caseID, personID string) error
+	LockPeople(ctx context.Context, ids ...string) error
 	AddParent(ctx context.Context, caseID, personID, parentID string) (*Relationship, error)
 	RemoveParent(ctx context.Context, caseID, personID, parentID string) error
 	RequireActive(ctx context.Context, caseID, personID string) error
+	ChildWithFullParents(ctx context.Context, caseID, personID string) (string, error)
 	Restore(ctx context.Context, caseID, id string) error
 	PermanentDelete(ctx context.Context, caseID, id string) error
 }
@@ -47,7 +49,7 @@ func NewStore(db *sql.DB) Store {
 func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int) ([]Person, int, error) {
 	var total int
 	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM people WHERE case_id = $1 AND deleted_at IS NULL`, caseID,
+		`SELECT COUNT(*) FROM active_people WHERE case_id = $1`, caseID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count people: %w", err)
 	}
@@ -60,10 +62,10 @@ func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int
 			birth_date::text, birth_place,
 			death_date::text, notes,
 			created_at, updated_at,
-			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN people pa ON pa.id = pr.parent_id AND pa.deleted_at IS NULL WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
+			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN active_people pa ON pa.id = pr.parent_id WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
 		FROM people
-		WHERE case_id = $1 AND deleted_at IS NULL
-		ORDER BY birth_date ASC NULLS LAST
+		WHERE id IN (SELECT id FROM active_people WHERE case_id = $1)
+		ORDER BY birth_date ASC NULLS LAST, created_at ASC, id ASC
 		LIMIT $2 OFFSET $3`,
 		caseID, perPage, offset)
 	if err != nil {
@@ -162,7 +164,7 @@ func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person
 			birth_date::text, birth_place,
 			death_date::text, notes,
 			created_at, updated_at,
-			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN people pa ON pa.id = pr.parent_id AND pa.deleted_at IS NULL WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
+			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN active_people pa ON pa.id = pr.parent_id WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
 		FROM people
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		personID, caseID,
@@ -204,26 +206,52 @@ func (s *store) DeletePerson(ctx context.Context, caseID, personID string) error
 	return nil
 }
 
+// AddParent links a parent to a person. The caller must already hold locks on
+// both people (LockPeople), so the checks and the insert see the same state.
 func (s *store) AddParent(ctx context.Context, caseID, personID, parentID string) (*Relationship, error) {
-	// Enforce max 2 parents.
+	conn := platform.Conn(ctx, s.db)
+
+	// A loop would form if the new parent already descends from the person.
+	// Every link counts, including those to trashed people, because a trashed
+	// person can be restored.
+	var loop bool
+	if err := conn.QueryRowContext(ctx, `
+		WITH RECURSIVE descendants(id) AS (
+			SELECT $1::uuid
+			UNION
+			SELECT pr.person_id FROM person_relationships pr
+			JOIN descendants d ON pr.parent_id = d.id
+		)
+		SELECT EXISTS (SELECT 1 FROM descendants WHERE id = $2::uuid)`,
+		personID, parentID,
+	).Scan(&loop); err != nil {
+		return nil, fmt.Errorf("check for loop: %w", err)
+	}
+	if loop {
+		return nil, platform.Conflict("This link would make a person their own ancestor.")
+	}
+
+	// Only active parents count towards the limit.
 	var parentCount int
-	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM person_relationships WHERE person_id = $1`,
+	if err := conn.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM person_relationships pr
+		JOIN active_people ap ON ap.id = pr.parent_id
+		WHERE pr.person_id = $1`,
 		personID,
 	).Scan(&parentCount); err != nil {
 		return nil, fmt.Errorf("count parents: %w", err)
 	}
 	if parentCount >= 2 {
-		return nil, ErrConflict
+		return nil, platform.Conflict("A person can have at most two parents. Remove a parent link first.")
 	}
 
-	_, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+	_, err := conn.ExecContext(ctx,
 		`INSERT INTO person_relationships (person_id, parent_id, case_id) VALUES ($1, $2, $3)`,
 		personID, parentID, caseID,
 	)
 	if err != nil {
 		if isPGError(err, pgUniqueViolation) {
-			return nil, ErrConflict
+			return nil, platform.Conflict("This parent link already exists.")
 		}
 		return nil, fmt.Errorf("insert relationship: %w", err)
 	}
@@ -280,19 +308,56 @@ func isPGError(err error, code string) bool {
 	return errors.As(err, &pgErr) && string(pgErr.Code) == code
 }
 
-// RequireActive returns ErrNotFound unless the person exists in the case and is not trashed.
+// RequireActive returns ErrNotFound unless the person is active: not in the
+// trash and not in a trashed case. It locks the person and their case until
+// the transaction ends, so neither can be trashed while a write that depends
+// on them is in progress.
 func (s *store) RequireActive(ctx context.Context, caseID, personID string) error {
-	var count int
-	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM people WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
+	var id string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT id::text FROM active_people WHERE id = $1 AND case_id = $2 FOR SHARE`,
 		personID, caseID,
-	).Scan(&count); err != nil {
-		return fmt.Errorf("verify person: %w", err)
-	}
-	if count == 0 {
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
+	if err != nil {
+		return fmt.Errorf("verify person: %w", err)
+	}
 	return nil
+}
+
+// ChildWithFullParents returns the name of a child of the trashed person who
+// already has two active parents, so restoring the person would give them a
+// third. It returns "" when there is none.
+func (s *store) ChildWithFullParents(ctx context.Context, caseID, personID string) (string, error) {
+	// Lock the children, as adding a parent does, so two restores running at
+	// once cannot both pass this check for the same child.
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`SELECT id FROM people WHERE id IN (SELECT person_id FROM person_relationships WHERE parent_id = $1)
+		 ORDER BY id FOR UPDATE`, personID); err != nil {
+		return "", fmt.Errorf("lock children: %w", err)
+	}
+	var name string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT c.first_name || ' ' || c.last_name
+		FROM person_relationships pr
+		JOIN people c ON c.id = pr.person_id
+		WHERE pr.parent_id = $1 AND pr.case_id = $2
+		  AND (SELECT COUNT(*) FROM person_relationships pr2
+		       JOIN active_people ap ON ap.id = pr2.parent_id
+		       WHERE pr2.person_id = pr.person_id AND pr2.parent_id <> $1) >= 2
+		ORDER BY c.last_name, c.first_name
+		LIMIT 1`,
+		personID, caseID,
+	).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("check children's parents: %w", err)
+	}
+	return name, nil
 }
 
 func (s *store) Restore(ctx context.Context, caseID, id string) error {
@@ -313,4 +378,28 @@ func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
 		return fmt.Errorf("permanent delete person: %w", err)
 	}
 	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+// LockActive takes an exclusive lock on a row about to be changed, then checks
+// that it is active. Taking the exclusive lock first means simultaneous writes
+// to the same row wait for each other instead of deadlocking.
+func (s *store) LockActive(ctx context.Context, caseID, id string) error {
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`SELECT id FROM people WHERE id = $1 FOR NO KEY UPDATE`, id); err != nil {
+		return fmt.Errorf("lock people: %w", err)
+	}
+	return s.RequireActive(ctx, caseID, id)
+}
+
+// LockPeople takes exclusive locks on people, always in the same order, so that
+// concurrent changes to family links involving any of them run one at a time.
+// Without this, two requests could each see one parent and both add a second,
+// or two opposite links could together form a loop.
+func (s *store) LockPeople(ctx context.Context, ids ...string) error {
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`SELECT id FROM people WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+		pq.Array(ids)); err != nil {
+		return fmt.Errorf("lock people: %w", err)
+	}
+	return nil
 }

@@ -16,12 +16,14 @@ import (
 var ErrNotFound = fmt.Errorf("life event %w", platform.ErrNotFound)
 
 type Store interface {
+	LockActive(ctx context.Context, caseID, id string) (personID string, err error)
 	ListLifeEvents(ctx context.Context, caseID string, page, perPage int) ([]LifeEvent, int, error)
 	CreateLifeEvent(ctx context.Context, caseID, personID, eventType string, input UpdateLifeEventInput) (*LifeEvent, error)
 	UpdateLifeEvent(ctx context.Context, caseID, eventID string, input UpdateLifeEventInput) (*LifeEvent, error)
 	DeleteLifeEvent(ctx context.Context, caseID, eventID string) error
 	ReassignLifeEvent(ctx context.Context, caseID, eventID, personID string) (*LifeEvent, error)
-	RequireActive(ctx context.Context, caseID, eventID string) error
+	RequireActive(ctx context.Context, caseID, eventID string) (personID string, err error)
+	TrashedPersonID(ctx context.Context, caseID, eventID string) (string, error)
 	Restore(ctx context.Context, caseID, id string) error
 	PermanentDelete(ctx context.Context, caseID, id string) error
 }
@@ -37,7 +39,7 @@ func NewStore(db *sql.DB) Store {
 func (s *store) ListLifeEvents(ctx context.Context, caseID string, page, perPage int) ([]LifeEvent, int, error) {
 	var total int
 	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM life_events WHERE case_id = $1 AND deleted_at IS NULL`, caseID,
+		`SELECT COUNT(*) FROM active_life_events WHERE case_id = $1`, caseID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count life events: %w", err)
 	}
@@ -53,10 +55,10 @@ func (s *store) ListLifeEvents(ctx context.Context, caseID string, page, perPage
 			COUNT(d.id) > 0 AS has_documents,
 			le.created_at, le.updated_at
 		FROM life_events le
-		LEFT JOIN documents d ON d.life_event_id = le.id AND d.deleted_at IS NULL
-		WHERE le.case_id = $1 AND le.deleted_at IS NULL
+		LEFT JOIN active_documents d ON d.life_event_id = le.id
+		WHERE le.id IN (SELECT id FROM active_life_events WHERE case_id = $1)
 		GROUP BY le.id
-		ORDER BY le.event_date ASC NULLS LAST, le.created_at ASC
+		ORDER BY le.event_date ASC NULLS LAST, le.created_at ASC, le.id ASC
 		LIMIT $2 OFFSET $3`,
 		caseID, perPage, offset)
 	if err != nil {
@@ -191,7 +193,7 @@ func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*Life
 			COUNT(d.id) > 0 AS has_documents,
 			le.created_at, le.updated_at
 		FROM life_events le
-		LEFT JOIN documents d ON d.life_event_id = le.id AND d.deleted_at IS NULL
+		LEFT JOIN active_documents d ON d.life_event_id = le.id
 		WHERE le.id = $1 AND le.case_id = $2 AND le.deleted_at IS NULL
 		GROUP BY le.id`,
 		eventID, caseID,
@@ -247,19 +249,39 @@ func nullToSQL(f platform.NullString) sql.NullString {
 	return sql.NullString{String: f.Value, Valid: f.Valid}
 }
 
-// RequireActive returns ErrNotFound unless the life event exists in the case and is not trashed.
-func (s *store) RequireActive(ctx context.Context, caseID, eventID string) error {
-	var count int
-	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM life_events WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
+// RequireActive returns the event's person, or ErrNotFound unless the event is
+// active: not in the trash and not beneath a trashed person or case. It locks
+// the event, its person and its case until the transaction ends.
+func (s *store) RequireActive(ctx context.Context, caseID, eventID string) (string, error) {
+	var personID string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT person_id::text FROM active_life_events WHERE id = $1 AND case_id = $2 FOR SHARE`,
 		eventID, caseID,
-	).Scan(&count); err != nil {
-		return fmt.Errorf("verify life event: %w", err)
+	).Scan(&personID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
 	}
-	if count == 0 {
-		return ErrNotFound
+	if err != nil {
+		return "", fmt.Errorf("verify life event: %w", err)
 	}
-	return nil
+	return personID, nil
+}
+
+// TrashedPersonID returns the person of a life event that is in the trash, or
+// ErrNotFound if the event is not in the trash.
+func (s *store) TrashedPersonID(ctx context.Context, caseID, eventID string) (string, error) {
+	var personID string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT person_id::text FROM life_events WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		eventID, caseID,
+	).Scan(&personID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("get trashed life event: %w", err)
+	}
+	return personID, nil
 }
 
 func (s *store) Restore(ctx context.Context, caseID, id string) error {
@@ -280,4 +302,15 @@ func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
 		return fmt.Errorf("permanent delete life event: %w", err)
 	}
 	return platform.RequireOneRow(result, ErrNotFound)
+}
+
+// LockActive takes an exclusive lock on a row about to be changed, then checks
+// that it is active. Taking the exclusive lock first means simultaneous writes
+// to the same row wait for each other instead of deadlocking.
+func (s *store) LockActive(ctx context.Context, caseID, id string) (string, error) {
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`SELECT id FROM life_events WHERE id = $1 FOR NO KEY UPDATE`, id); err != nil {
+		return "", fmt.Errorf("lock life_events: %w", err)
+	}
+	return s.RequireActive(ctx, caseID, id)
 }
