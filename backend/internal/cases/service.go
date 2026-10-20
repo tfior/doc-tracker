@@ -30,6 +30,12 @@ func (s *Service) GetCase(ctx context.Context, caseID string) (*CaseDetail, erro
 	return s.store.GetCase(ctx, caseID)
 }
 
+// RequireActive returns an error wrapping platform.ErrNotFound unless the case
+// exists and is not in the trash. Other modules call this through an interface.
+func (s *Service) RequireActive(ctx context.Context, caseID string) error {
+	return s.store.RequireActive(ctx, caseID)
+}
+
 func (s *Service) CreateCase(ctx context.Context, title string) (*Case, error) {
 	var c *Case
 	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
@@ -48,6 +54,9 @@ func (s *Service) CreateCase(ctx context.Context, title string) (*Case, error) {
 func (s *Service) UpdateCase(ctx context.Context, caseID string, title *string, status *string) (*Case, error) {
 	var c *Case
 	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		if err := s.store.LockActive(ctx, caseID); err != nil {
+			return err
+		}
 		var err error
 		if c, err = s.store.UpdateCase(ctx, caseID, title, status); err != nil {
 			return err
@@ -64,6 +73,9 @@ func (s *Service) UpdateCase(ctx context.Context, caseID string, title *string, 
 
 func (s *Service) DeleteCase(ctx context.Context, caseID string) error {
 	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		if err := s.store.LockActive(ctx, caseID); err != nil {
+			return err
+		}
 		if err := s.store.DeleteCase(ctx, caseID); err != nil {
 			return err
 		}

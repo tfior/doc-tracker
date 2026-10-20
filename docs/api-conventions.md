@@ -40,6 +40,7 @@ Resources are nested under their owning case.
 - Files and exports are case-scoped for the same reason. No file is addressable by its ID alone
 - `PersonRelationship` is managed through the people endpoints, not a separate route
 - `DocumentNamedPerson` entries are part of their Document, read and written with it, not a separate route
+- A ClaimLine's members are part of it, returned with it, not a separate route. A ClaimLine is created with an applicant and a root ancestor. When more than one path exists between them, the request must also give `path`, the person IDs in order; without it, the request is refused with the available paths listed
 - An Application's applicants are part of the Application, read and written with it, not a separate route
 - The Application Files export is a sub-resource of its Application. The All Files export is a sub-resource of the case. Neither is top-level
 - `GET /api/v1/cases` accepts `?status=` (`active`, `on_hold`, `complete`), `?archived=true` to list archived cases instead of current ones, and `?q=` to search by title

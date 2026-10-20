@@ -147,8 +147,9 @@ func TestGetCaseTrash_ShowsDeletedEntities(t *testing.T) {
 
 	// One active person, one trashed person; one trashed document.
 	env.createPerson(t, c.ID) // active, should not appear
-	env.deletePerson(t, c.ID, p.ID)
+	// The document goes first: once its person is trashed it is frozen.
 	env.deleteDocument(t, c.ID, d.ID)
+	env.deletePerson(t, c.ID, p.ID)
 
 	rec := env.do("GET", "/api/v1/cases/"+c.ID+"/trash", nil)
 

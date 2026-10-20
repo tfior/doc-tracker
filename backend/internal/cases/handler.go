@@ -111,6 +111,9 @@ func (h *Handler) updateCase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c, err := h.svc.UpdateCase(r.Context(), caseID, body.Title, body.Status)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
 		return
@@ -127,6 +130,9 @@ func (h *Handler) deleteCase(w http.ResponseWriter, r *http.Request) {
 	caseID := r.PathValue("caseId")
 
 	err := h.svc.DeleteCase(r.Context(), caseID)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
 		return

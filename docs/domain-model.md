@@ -61,7 +61,7 @@ A permanent record that a Case was permanently deleted. Written in the same tran
 ---
 
 ### Case
-The top-level container for a document collection effort. A case explores one or more candidate root ancestors through its ClaimLines and pursues exactly one of them. It may have several applicants, grouped into Applications.
+The top-level container for a document collection effort. A case explores candidate root ancestors and pursues exactly one of them. Each applicant claims through that ancestor by one ClaimLine, and applicants are grouped into Applications.
 
 Archiving is a state, not a status. An archived case keeps its status, is hidden from the default case list, and is read-only until it is unarchived.
 
@@ -70,7 +70,7 @@ Archiving is a state, not a status. An archived case keeps its status, is hidden
 | id | uuid | |
 | title | text | |
 | status | enum | active, on_hold, complete |
-| pursued_claim_line_id | uuid? | FK → ClaimLine; the line this case pursues; null until one is chosen |
+| pursued_root_person_id | uuid? | FK → Person; the root ancestor this case pursues; null until chosen |
 | notes | text? | |
 | archived_at | timestamp? | null = not archived; set = archived |
 | version | integer | increases on every change; used to detect concurrent edits |
@@ -81,16 +81,19 @@ Archiving is a state, not a status. An archived case keeps its status, is hidden
 ---
 
 ### ClaimLine
-One candidate root ancestor and the line descending from them. A new case has none; a simple case ends up with one. Supports mid-case pivots and multi-line eligibility research without structural rebuilds. Several ClaimLines in a case may be eligible, but the case pursues only one.
+One applicant's claim through one root ancestor: the applicant, the root ancestor, and the exact path of people between them. Eligibility is judged for the whole path, because events anywhere along it can break the chain, so siblings with the same root ancestor have separate ClaimLines that may reach different outcomes. An applicant may have ClaimLines to several root ancestors.
 
-`root_person_id` is the root ancestor: the lineage-relevant ancestor at the top of the line. It is labelled "Root Ancestor" in the UI. The path from the root ancestor down to any applicant is not stored; it is derived from the parent-child relationships.
+`root_person_id` is the root ancestor ("Root Ancestor" in the UI). The path is stored as ClaimLineMembers. When a ClaimLine is created, its path is found from the parent-child relationships: if there is exactly one, it is used; if there are several, because relatives married somewhere along the line, the user chooses one; if there is none, the ClaimLine cannot be created.
 
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid | |
 | case_id | uuid | FK → Case |
+| applicant_person_id | uuid | FK → Person; immutable after creation |
 | root_person_id | uuid | FK → Person; immutable after creation |
 | status | enum | not_yet_researched, researching, paused, ineligible, eligible |
+| pursued | boolean | default false; at most one per applicant |
+| path_key | text | the path's person IDs in order; unique within the Case |
 | notes | text? | |
 | version | integer | increases on every change; used to detect concurrent edits |
 | created_at | timestamp | |
@@ -99,8 +102,19 @@ One candidate root ancestor and the line descending from them. A new case has no
 
 ---
 
+### ClaimLineMember
+One person on a ClaimLine's path. Members are created with their ClaimLine and never edited, and have no soft-delete.
+
+| Field | Type | Notes |
+|---|---|---|
+| claim_line_id | uuid | FK → ClaimLine |
+| person_id | uuid | FK → Person |
+| position | integer | 0 = the root ancestor; the highest position = the applicant |
+
+---
+
 ### Application
-One submission: one venue, one physical set of documents, and one or more applicants. A case may have several, for example relatives who must apply at different consulates, or groups limited by a venue's cap on applicants per document set. Every Application in a case relies on the case's pursued ClaimLine.
+One submission: one venue, one physical set of documents, and one or more applicants. A case may have several, for example relatives who must apply at different consulates, or groups limited by a venue's cap on applicants per document set. Each applicant takes part through their pursued ClaimLine, which supplies their path.
 
 An Application's Documents and its status are derived, not stored (see Applications under Domain Rules). Applications have no soft-delete: deleting one is immediate and permanent, and the UI says so before the user confirms.
 
@@ -345,42 +359,49 @@ A **supporting** file is anything else worth keeping with the document, such as 
 
 ### Cases
 
-8. A Case pursues at most one ClaimLine, named by `pursued_claim_line_id`. It is null until a line is chosen, and may be changed to a different line.
-9. Only a ClaimLine with status `eligible` can be pursued. While a ClaimLine is pursued, its status cannot be changed away from `eligible`; the Case must stop pursuing it first. An attempt to change it is refused with a message that says this, so the user knows what to do.
-10. No two applicants in a Case claim through different root ancestors. This is enforced by structure: the pursued line is chosen once on the Case, and Applications do not name a line of their own.
-11. An archived Case is hidden from the default case list and is read-only: nothing in it can be added, changed, or deleted until it is unarchived. Archiving does not change the Case's status, and an archived Case is never purged.
+8. A Case pursues at most one root ancestor, named by `pursued_root_person_id`. It is null until chosen, must be the root ancestor of at least one ClaimLine in the Case, and cannot be changed or cleared while any ClaimLine is pursued. The refusal says so.
+9. No two applicants in a Case claim through different root ancestors. This is enforced by the Case's pursued root ancestor: only ClaimLines to it can be pursued.
+10. An archived Case is hidden from the default case list and is read-only: nothing in it can be added, changed, or deleted until it is unarchived. Archiving does not change the Case's status, and an archived Case is never purged.
+
+### Claim Lines
+
+11. A ClaimLine's path is a chain of parent-child relationships from its root ancestor down to its applicant. No two ClaimLines in a Case may have the same path.
+12. For now, a Case has at most one ClaimLine per applicant and root ancestor. This restriction is temporary: several per pair, each with a different path, is planned.
+13. A ClaimLine can be marked pursued only if it is eligible and its root ancestor is the Case's pursued root ancestor. An applicant has at most one pursued ClaimLine. While a ClaimLine is pursued, its status cannot be changed away from `eligible`; the refusal says to unmark it first.
+14. A parent-child relationship used by any ClaimLine's path cannot be removed. The refusal names the ClaimLines that depend on it.
+15. A ClaimLine is active only while its applicant, its root ancestor and every person on its path are active. While anyone on the path is trashed, the ClaimLine is hidden and frozen.
+16. Permanently deleting a Person permanently deletes every ClaimLine whose path includes them.
 
 ### Applications
 
-12. An Application's applicants are Persons in the same Case.
-13. An Application's Documents are derived. For each applicant, take every Person on the path from the applicant up to the root ancestor of the Case's pursued ClaimLine, both included, following parent-child relationships; where more than one path exists, all are included. The Application's Documents are the needed, for-submission Documents of those Persons, each counted once.
-14. If the Case pursues no ClaimLine, or an applicant does not descend from its root ancestor, that applicant contributes no Documents, and the Application reports why, prominently, so the user can tell whether the applicant was added in error or a parent link is missing.
-15. An Application's status is derived: `ready_for_submission` when it has at least one Document and every one of its Documents is ready; otherwise `preparing`, reported with the number ready out of the total.
-16. The number of copies required of a Document is the number of Applications in the Case whose Documents include it. A Document's phases describe its set of copies as a whole.
+17. An Application's applicants are Persons in the same Case. Each takes part through their pursued ClaimLine. An applicant without one contributes no Documents, and the Application reports this prominently.
+18. An Application's Documents are the needed, for-submission Documents of every Person on its applicants' pursued paths, each counted once. People shared by several applicants' paths, such as a parent and child applying together, contribute their Documents once.
+19. An Application's status is derived: `ready_for_submission` when it has at least one Document and every one of its Documents is ready; otherwise `preparing`, reported with the number ready out of the total.
+20. The number of copies required of a Document is the number of Applications in the Case whose Documents include it. A Document's phases describe its set of copies as a whole.
 
 ### Marriages and Spouses
 
-17. A spouse is a Person record only when they are in a line being explored. Otherwise their details live on the marriage LifeEvent as flat fields (`spouse_name`, `spouse_birth_date`, `spouse_birth_place`).
-18. When both spouses are Persons in the Case, the marriage is a single LifeEvent with `person_id` set to one and `spouse_person_id` set to the other. The flat spouse fields are not used; the spouse's name and birth details come from the linked Person.
-19. `spouse_person_id` must refer to a Person in the same Case, other than the event's `person_id`.
-20. A Person's LifeEvents are those where they are the `person_id` or the `spouse_person_id`. A shared marriage and its Documents appear under both people.
-21. A flat-field spouse can be promoted to a Person: a Person is created from the flat fields and the marriage event is linked to them, in a single transaction.
-22. A shared marriage is hidden, frozen, or permanently deleted along with a Person only when that is true of both spouses. If one spouse is trashed, the marriage stays active under the other. If one spouse is permanently deleted, the marriage and its Documents stay with the surviving spouse, and the deleted spouse's name is kept in `spouse_name`.
+21. A spouse is a Person record only when they are in a line being explored. Otherwise their details live on the marriage LifeEvent as flat fields (`spouse_name`, `spouse_birth_date`, `spouse_birth_place`).
+22. When both spouses are Persons in the Case, the marriage is a single LifeEvent with `person_id` set to one and `spouse_person_id` set to the other. The flat spouse fields are not used; the spouse's name and birth details come from the linked Person.
+23. `spouse_person_id` must refer to a Person in the same Case, other than the event's `person_id`.
+24. A Person's LifeEvents are those where they are the `person_id` or the `spouse_person_id`. A shared marriage and its Documents appear under both people.
+25. A flat-field spouse can be promoted to a Person: a Person is created from the flat fields and the marriage event is linked to them, in a single transaction.
+26. A shared marriage is hidden, frozen, or permanently deleted along with a Person only when that is true of both spouses. If one spouse is trashed, the marriage stays active under the other. If one spouse is permanently deleted, the marriage and its Documents stay with the surviving spouse, and the deleted spouse's name is kept in `spouse_name`.
 
 ### Document Phases
 
-23. A Document always has four non-nullable phase status fields. All four are initialized at creation with their phase default: official_copy → Not Started, amendment → Unknown, apostille → Not Started, translation → Not Started.
-24. Document phase status transitions are free — any status to any status within the same phase. No state machine is enforced.
-25. A phase status of "Not Required" (progress_bucket: complete) signifies that phase does not apply to this document. For the official_copy phase, "Not Required" means the entire document is not needed for the case.
-26. A `phase` of `any` on a DocumentStatus means the status appears in all four phase pickers.
-27. System DocumentStatus entries cannot be edited or deleted by users.
-28. User-defined DocumentStatus entries are global (shared across all cases). The admin UI for creating them is deferred post-MVP.
-29. Each phase records the date it entered its current status. The date is set to the current day whenever the status changes, and a user may correct it, for example to back-date a request entered late. How long a phase has been in its status is derived from it.
-30. Each phase has an optional free-text reference for the order, case, or tracking number of its request.
+27. A Document always has four non-nullable phase status fields. All four are initialized at creation with their phase default: official_copy → Not Started, amendment → Unknown, apostille → Not Started, translation → Not Started.
+28. Document phase status transitions are free — any status to any status within the same phase. No state machine is enforced.
+29. A phase status of "Not Required" (progress_bucket: complete) signifies that phase does not apply to this document. For the official_copy phase, "Not Required" means the entire document is not needed for the case.
+30. A `phase` of `any` on a DocumentStatus means the status appears in all four phase pickers.
+31. System DocumentStatus entries cannot be edited or deleted by users.
+32. User-defined DocumentStatus entries are global (shared across all cases). The admin UI for creating them is deferred post-MVP.
+33. Each phase records the date it entered its current status. The date is set to the current day whenever the status changes, and a user may correct it, for example to back-date a request entered late. How long a phase has been in its status is derived from it.
+34. Each phase has an optional free-text reference for the order, case, or tracking number of its request.
 
 ### Readiness
 
-31. Every Document has a readiness status derived from its phase statuses and `details_checked`:
+35. Every Document has a readiness status derived from its phase statuses and `details_checked`:
 
     | Status | Rule |
     |---|---|
@@ -389,85 +410,85 @@ A **supporting** file is anything else worth keeping with the document, such as 
     | not_started | The document is needed and all four phases are in the `not_started` progress bucket |
     | in_progress | Anything else |
 
-32. A needed Document that is not ready reports why: each phase that is not complete, and whether the details have been checked.
-33. Readiness does not depend on whether a file has been uploaded. A ready Document with no submission file is reported by the Application Files export.
-34. Case progress is the count of the case's needed Documents in each readiness status.
-35. The outstanding list for a case contains every needed Document that is not ready. Each appears once, under the earliest thing it is waiting on, in this order: official copy, amendment, apostille, translation, details check. The list can be grouped by that stage or by Person, and sorted by how long each Document has been waiting.
-36. A Document with `for_submission` set to false is tracked like any other, with its own readiness, but belongs to no Application's Documents and is left out of the Application Files export. It appears in the All Files export.
-37. The age of a Document's current copy is derived from `issue_date` when that is a full date. It is shown wherever an Application's Documents are listed. The app applies no age limit; whether a copy is too old for a venue is the user's judgement.
+36. A needed Document that is not ready reports why: each phase that is not complete, and whether the details have been checked.
+37. Readiness does not depend on whether a file has been uploaded. A ready Document with no submission file is reported by the Application Files export.
+38. Case progress is the count of the case's needed Documents in each readiness status.
+39. The outstanding list for a case contains every needed Document that is not ready. Each appears once, under the earliest thing it is waiting on, in this order: official copy, amendment, apostille, translation, details check. The list can be grouped by that stage or by Person, and sorted by how long each Document has been waiting.
+40. A Document with `for_submission` set to false is tracked like any other, with its own readiness, but belongs to no Application's Documents and is left out of the Application Files export. It appears in the All Files export.
+41. The age of a Document's current copy is derived from `issue_date` when that is a full date. It is shown wherever an Application's Documents are listed. The app applies no age limit; whether a copy is too old for a venue is the user's judgement.
 
 ### Files
 
-38. Files are uploaded directly to object storage via the backend using multipart form upload. Presigned URLs are not used for MVP.
-39. Object storage buckets must have server-side encryption (SSE) enabled. This is a deployment requirement, not enforced in application code.
-40. Uploading a submission file makes it the current version. Earlier versions are retained, never deleted, and any of them can be restored to current.
-41. A Document has at most one current submission file. This is enforced by the database.
-42. A submission file must be a PDF. A supporting file must be a PDF or an image. The file's content is checked, not only its name.
-43. The maximum upload size is a deployment setting.
-44. When uploading a submission file, the user may flag it as changing the recorded details. Doing so clears `details_checked`.
-45. Uploading a file never changes a phase status.
+42. Files are uploaded directly to object storage via the backend using multipart form upload. Presigned URLs are not used for MVP.
+43. Object storage buckets must have server-side encryption (SSE) enabled. This is a deployment requirement, not enforced in application code.
+44. Uploading a submission file makes it the current version. Earlier versions are retained, never deleted, and any of them can be restored to current.
+45. A Document has at most one current submission file. This is enforced by the database.
+46. A submission file must be a PDF. A supporting file must be a PDF or an image. The file's content is checked, not only its name.
+47. The maximum upload size is a deployment setting.
+48. When uploading a submission file, the user may flag it as changing the recorded details. Doing so clears `details_checked`.
+49. Uploading a file never changes a phase status.
 
 ### Exports
 
-46. The Application Files export is produced for one Application. It contains the current submission file of every ready Document among the Application's Documents, and nothing else.
-47. The export is a ZIP containing the files and a manifest. The manifest covers every one of the Application's Documents: each Document included, with its file name and the age of its copy, and each Document left out, with the reason (not ready, or ready but with no submission file).
-48. Exported files are named by the app: packet order, generation, the subject's surname and given name, and the document type, for example `04 G2 Rossi Antonio - Birth Certificate.pdf`. Generation is counted from the root ancestor, who is generation 1, so a name does not depend on which applicant is applying. The Document's title is appended for the `court_order` and `other` types.
-49. Packet order runs from the root ancestor down to the applicants, and matches the order of the manifest.
-50. The ZIP, and the single folder inside it, are named for the Case and the Application.
-51. The All Files export for a case contains every FileAttachment of every Document: all submission file versions and all supporting files.
+50. The Application Files export is produced for one Application. It contains the current submission file of every ready Document among the Application's Documents, and nothing else.
+51. The export is a ZIP containing the files and a manifest. The manifest covers every one of the Application's Documents: each Document included, with its file name and the age of its copy, and each Document left out, with the reason (not ready, or ready but with no submission file).
+52. Exported files are named by the app: packet order, generation, the subject's surname and given name, and the document type, for example `04 G2 Rossi Antonio - Birth Certificate.pdf`. Generation is counted from the root ancestor, who is generation 1, so a name does not depend on which applicant is applying. The Document's title is appended for the `court_order` and `other` types.
+53. Packet order runs from the root ancestor down to the applicants, and matches the order of the manifest.
+54. The ZIP, and the single folder inside it, are named for the Case and the Application.
+55. The All Files export for a case contains every FileAttachment of every Document: all submission file versions and all supporting files.
 
 ### Dates
 
-52. A partial date may be a year, a year and month, or a full date. A less precise date is compatible with any more precise date that falls within it: `1890` is compatible with `1890-03-15`.
-53. Working dates are qualified dates. These are `LifeEvent.event_date`, `LifeEvent.spouse_birth_date`, and `LifeEvent.divorce_date`.
-54. Document dates (`issue_date`, `registration_date`, `recorded_birth_date`) are partial dates with no qualifier. They transcribe what the document says.
-55. A recorded age is stored as the number the document gives, never converted to a birth year. An age implies a twelve-month birth window that usually spans two calendar years. When the Document's LifeEvent has an exact full date, the UI shows that window next to the age: age 25 at an event on 1921-06-10 implies a birth between 1895-06-11 and 1896-06-10.
+56. A partial date may be a year, a year and month, or a full date. A less precise date is compatible with any more precise date that falls within it: `1890` is compatible with `1890-03-15`.
+57. Working dates are qualified dates. These are `LifeEvent.event_date`, `LifeEvent.spouse_birth_date`, and `LifeEvent.divorce_date`.
+58. Document dates (`issue_date`, `registration_date`, `recorded_birth_date`) are partial dates with no qualifier. They transcribe what the document says.
+59. A recorded age is stored as the number the document gives, never converted to a birth year. An age implies a twelve-month birth window that usually spans two calendar years. When the Document's LifeEvent has an exact full date, the UI shows that window next to the age: age 25 at an event on 1921-06-10 implies a birth between 1895-06-11 and 1896-06-10.
 
 ### Recorded Details
 
-56. A Document's recorded details are its own `recorded_*` fields, which describe its subject, and its DocumentNamedPerson entries, which describe the other people it names. `details_checked` attests to all of them.
-57. A DocumentNamedPerson may be linked only to a Person in the same Case, and not to the Document's own subject.
-58. Everything recorded about a Person is the `recorded_*` fields of that Person's own Documents together with every DocumentNamedPerson entry linked to them. The person screen shows these side by side, one row per Document, with the recorded name, the birth date or the age with its implied birth window, and the birth place. The Person's birth certificate is listed first and marked as the reference, since their other documents must agree with it. Comparison is by eye; automatic discrepancy flagging is deferred post-MVP.
-59. Changes to a Document's DocumentNamedPerson entries are logged as part of that Document's `updated` ActivityLog entry.
+60. A Document's recorded details are its own `recorded_*` fields, which describe its subject, and its DocumentNamedPerson entries, which describe the other people it names. `details_checked` attests to all of them.
+61. A DocumentNamedPerson may be linked only to a Person in the same Case, and not to the Document's own subject.
+62. Everything recorded about a Person is the `recorded_*` fields of that Person's own Documents together with every DocumentNamedPerson entry linked to them. The person screen shows these side by side, one row per Document, with the recorded name, the birth date or the age with its implied birth window, and the birth place. The Person's birth certificate is listed first and marked as the reference, since their other documents must agree with it. Comparison is by eye; automatic discrepancy flagging is deferred post-MVP.
+63. Changes to a Document's DocumentNamedPerson entries are logged as part of that Document's `updated` ActivityLog entry.
 
 ### Activity Log
 
-60. ActivityLog entries are append-only. They are never updated. They are removed only when their Case is permanently deleted.
-61. `ActivityLog.entity_name` is captured at the time of the action and is not updated if the entity is later renamed or deleted.
-62. `ActivityLog.changes` stores field-level diffs for `updated` actions only, with the old and new value of each field whose value changed. It is null for all other actions.
-63. Activity log entries are written for all write operations on case-scoped entities (cases, people, person relationships, life events, documents, file attachments, claim lines, applications), including archive, restore, and permanent delete.
-64. An activity log entry is written in the same database transaction as the change it records. If either fails, neither is saved.
+64. ActivityLog entries are append-only. They are never updated. They are removed only when their Case is permanently deleted.
+65. `ActivityLog.entity_name` is captured at the time of the action and is not updated if the entity is later renamed or deleted.
+66. `ActivityLog.changes` stores field-level diffs for `updated` actions only, with the old and new value of each field whose value changed. It is null for all other actions.
+67. Activity log entries are written for all write operations on case-scoped entities (cases, people, person relationships, life events, documents, file attachments, claim lines, applications), including archive, restore, and permanent delete.
+68. An activity log entry is written in the same database transaction as the change it records. If either fails, neither is saved.
 
 ### Soft-delete and Trash
 
-65. Case, Person, LifeEvent, Document, and ClaimLine have a `deleted_at` column. A null value means active; a non-null value means trashed. Application, PersonRelationship, DocumentNamedPerson, and FileAttachment have no soft-delete.
-66. All read queries filter `WHERE deleted_at IS NULL`. Trashed entities are excluded from normal results and only appear in the trash view.
-67. Only directly-deleted entities appear in the trash. Children of a trashed entity are hidden implicitly — their own `deleted_at` remains null and they do not appear in the trash independently.
-68. A trashed entity and all its implicitly-hidden children are frozen: no edits, no reassignment, no new children may be added until the parent is restored.
-69. Restoring a trashed entity automatically restores all implicitly-hidden children (they were never independently deleted).
-70. Trashed entities are permanently hard-deleted after 30 days. All descendant entities are permanently deleted via DB-level `ON DELETE CASCADE` foreign keys.
-71. Permanently deleting a Document, directly or through a parent, also deletes its files from object storage.
-72. Permanently deleting a Case, by a user or by the 30-day purge, writes a CaseDeletionRecord in the same transaction. The case's ActivityLog entries are deleted with it.
-73. If a LifeEvent is permanently deleted, its Documents are also permanently deleted (CASCADE). If the user wants a Document to survive the deletion of its LifeEvent, they must reassign the Document to another event (or ungroup it) before deleting the event.
-74. Before a Person or LifeEvent is moved to the trash or permanently deleted, the user is told what goes with it: for a LifeEvent, the number of its Documents; for a Person, the number of their LifeEvents and Documents, and any ClaimLine rooted at them.
-75. If a user explicitly deletes a child entity while its parent is still active (e.g., deletes a Document while the Person and LifeEvent are active), that child appears in the trash independently and follows its own 30-day clock.
-76. PersonRelationship uses hard-delete only. Deleted relationships are gone immediately with no trash period.
+69. Case, Person, LifeEvent, Document, and ClaimLine have a `deleted_at` column. A null value means active; a non-null value means trashed. Application, ClaimLineMember, PersonRelationship, DocumentNamedPerson, and FileAttachment have no soft-delete.
+70. All read queries filter `WHERE deleted_at IS NULL`. Trashed entities are excluded from normal results and only appear in the trash view.
+71. Only directly-deleted entities appear in the trash. Children of a trashed entity are hidden implicitly — their own `deleted_at` remains null and they do not appear in the trash independently.
+72. A trashed entity and all its implicitly-hidden children are frozen: no edits, no reassignment, no new children may be added until the parent is restored.
+73. Restoring a trashed entity automatically restores all implicitly-hidden children (they were never independently deleted).
+74. Trashed entities are permanently hard-deleted after 30 days. All descendant entities are permanently deleted via DB-level `ON DELETE CASCADE` foreign keys.
+75. Permanently deleting a Document, directly or through a parent, also deletes its files from object storage.
+76. Permanently deleting a Case, by a user or by the 30-day purge, writes a CaseDeletionRecord in the same transaction. The case's ActivityLog entries are deleted with it.
+77. If a LifeEvent is permanently deleted, its Documents are also permanently deleted (CASCADE). If the user wants a Document to survive the deletion of its LifeEvent, they must reassign the Document to another event (or ungroup it) before deleting the event.
+78. Before a Person or LifeEvent is moved to the trash or permanently deleted, the user is told what goes with it: for a LifeEvent, the number of its Documents; for a Person, the number of their LifeEvents and Documents, any ClaimLine rooted at them, and any ClaimLine whose path includes them.
+79. If a user explicitly deletes a child entity while its parent is still active (e.g., deletes a Document while the Person and LifeEvent are active), that child appears in the trash independently and follows its own 30-day clock.
+80. PersonRelationship uses hard-delete only. Deleted relationships are gone immediately with no trash period.
 
 ### Reassignment
 
-77. A LifeEvent may be reassigned to a different Person within the same Case. Cross-case reassignment is not permitted.
-78. A Document may be reassigned to a different LifeEvent within the same Case, including one belonging to a different Person. When the target event belongs to a different Person, `person_id` and `life_event_id` are updated atomically in a single transaction.
-79. A Document's `life_event_id` may be set to null to ungroup it from any event, leaving it associated with its Person only.
-80. Reassignment is not permitted if the entity being moved or its target parent is trashed.
-81. Reassignment is logged as an `updated` action in ActivityLog with the old and new parent ID(s) captured in `changes`.
-82. PersonRelationship graph validation is enforced in the application layer: a Person may have at most 2 parents, and no Person may be both a direct ancestor and a direct descendant of the same Person (no circular relationships).
+81. A LifeEvent may be reassigned to a different Person within the same Case. Cross-case reassignment is not permitted.
+82. A Document may be reassigned to a different LifeEvent within the same Case, including one belonging to a different Person. When the target event belongs to a different Person, `person_id` and `life_event_id` are updated atomically in a single transaction.
+83. A Document's `life_event_id` may be set to null to ungroup it from any event, leaving it associated with its Person only.
+84. Reassignment is not permitted if the entity being moved or its target parent is trashed.
+85. Reassignment is logged as an `updated` action in ActivityLog with the old and new parent ID(s) captured in `changes`.
+86. PersonRelationship graph validation is enforced in the application layer: a Person may have at most 2 parents, and no Person may be both a direct ancestor and a direct descendant of the same Person (no circular relationships).
 
 ---
 
 ## MoSCoW
 
 ### Must (MVP)
-- User, Case, ClaimLine, Application, ApplicationApplicant, Person, PersonRelationship, LifeEvent, Document, DocumentNamedPerson, DocumentStatus, ActivityLog, CaseDeletionRecord
+- User, Case, ClaimLine, ClaimLineMember, Application, ApplicationApplicant, Person, PersonRelationship, LifeEvent, Document, DocumentNamedPerson, DocumentStatus, ActivityLog, CaseDeletionRecord
 - Multi-user authentication (shared access, all users see all data, no per-user permissions); session-based
 - Activity log data capture on all write operations, in the same transaction as the change (display deferred)
 - Record versions, so concurrent edits are refused rather than silently overwritten
@@ -475,7 +496,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 - Other people named in a document, and a per-person comparison of recorded details
 - Marriages between two people in a case (one shared marriage event)
 - Case statuses (active, on hold, complete), archiving, and case notes
-- One pursued claim line per case
+- Claim lines as stored paths from root ancestor to applicant; one pursued line per applicant, all to the case's pursued root ancestor
 - Applications: applicants grouped by venue, with derived documents, status, and copies required
 - Case list with status filter and title search
 - Case overview (ClaimLine status summary + LifeEvents without documents)
@@ -493,7 +514,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 - Activity feed UI (per-case feed; per-entity feed)
 - Checklist/Task entity for lightweight user-driven progress tracking
 - Admin UI for managing user-defined DocumentStatus entries
-- `ClaimLineMember` — explicit ordered path from root ancestor to applicant, for the rare case where more than one path exists between them and only one should be used. The MVP derives the path from the `person_relationships` graph and includes every path.
+- Several ClaimLines per applicant and root ancestor, each with a different path
 - Async export job records with file manifest
 - DocumentNameRecord — structured AKA / name variants per document (several recorded names for the same person)
 - NameDiscrepancy records with severity and resolution status

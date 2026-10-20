@@ -7,13 +7,8 @@ package platform
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 )
-
-// ErrNotFound is the sentinel every module's not-found error wraps, so that one
-// module can recognise "not found" from another without importing it.
-var ErrNotFound = errors.New("not found")
 
 // DBTX is the subset of *sql.DB and *sql.Tx that stores use to run SQL.
 type DBTX interface {
@@ -73,14 +68,4 @@ func RequireOneRow(result sql.Result, notFound error) error {
 		return notFound
 	}
 	return nil
-}
-
-// MapNotFound returns target when err is any module's not-found error, and err
-// unchanged otherwise. A module uses it to report another module's missing
-// entity as its own.
-func MapNotFound(err, target error) error {
-	if errors.Is(err, ErrNotFound) {
-		return target
-	}
-	return err
 }

@@ -155,20 +155,19 @@ Structure
 - [x] Transaction helper in `platform`; stores run on the transaction their service opened
 - [x] Services own each unit of work: the change and its activity log entry in one transaction
 - [x] Module boundaries: modules declare the interfaces they need, wired in `internal/app`; each module is the only writer of its tables
-- [ ] Each owning module answers "is this active?" for its entities: exists, in the case, not trashed, not beneath a trashed parent
+- [x] Each owning module answers "is this active?" for its entities: exists, in the case, not trashed, not beneath a trashed parent
 - [x] `trash` becomes a coordinator; owning modules restore and permanently delete their own records
 - [x] Confirm gone: the per-handler logging helper, the per-module nullable field type, the repeated person-in-case check
 
 Defects from the review
-- [ ] Circular parent links are refused
-- [ ] Reassigning a life event moves its documents with it
-- [ ] A document's person always matches its life event's person, on create and on reassignment
-- [ ] Lists exclude everything beneath a trashed parent; writes beneath a trashed parent or in a trashed case are refused
-- [ ] The claim line summary excludes trashed claim lines
-- [ ] The two-parent limit counts only active parents
-- [ ] One claim line per root ancestor per case
-- [ ] Permanently deleting a life event deletes its documents (migration: change the foreign key to CASCADE)
-- [ ] An active check locks the row it checks until the write commits, so a parent trashed at the same moment cannot receive a new child
+- [x] Circular parent links are refused
+- [x] Reassigning a life event moves its documents with it
+- [x] A document's person always matches its life event's person, on create and on reassignment
+- [x] Lists exclude everything beneath a trashed parent; writes beneath a trashed parent or in a trashed case are refused
+- [x] The claim line summary excludes trashed claim lines
+- [x] The two-parent limit counts only active parents
+- [x] Permanently deleting a life event deletes its documents (migration: change the foreign key to CASCADE)
+- [x] An active check locks the row it checks until the write commits, so a parent trashed at the same moment cannot receive a new child
 
 Activity log
 - [ ] `changes` holds the old and new value of each field that actually changed
@@ -275,7 +274,8 @@ After this milestone the app answers "what is still outstanding on this case?".
 ### Acceptance Criteria
 
 - A case can be put on hold, completed, and archived; an archived case cannot be changed
-- A case pursues one eligible claim line
+- A case pursues one root ancestor, and each applicant one eligible claim line to it
+- Each claim line records the exact path from root ancestor to applicant
 - Applicants are grouped into applications, each showing the documents it needs and whether it is ready for submission
 - The case list can be filtered by status and searched by title
 
@@ -284,10 +284,13 @@ After this milestone the app answers "what is still outstanding on this case?".
 - [ ] Case status becomes active, on hold, or complete; `archived_at` with archive and unarchive actions; notes
 - [ ] An archived case is read-only, enforced where "is this active?" is answered
 - [ ] Case list: status filter, archived filter, title search
-- [ ] `pursued_claim_line_id` replaces `primary_root_person_id`; only an eligible line can be pursued; a pursued line's status is locked, with a message saying why
+- [ ] `pursued_root_person_id` replaces `primary_root_person_id`, with its rules
+- [ ] Claim lines gain an applicant and a stored path, found from the family links; no two with the same path, and for now one per applicant and root ancestor
+- [ ] The pursued flag: one per applicant, eligible only, to the case's pursued root ancestor; status locked while pursued
+- [ ] A parent link used by a path cannot be removed; permanently deleting a person deletes the claim lines whose path includes them
 - [ ] `applications` module: applications and their applicants
-- [ ] An application's documents, derived from each applicant's path to the root ancestor
-- [ ] An applicant with no path to the root ancestor is reported
+- [ ] An application's documents, from each applicant's pursued claim line, each counted once
+- [ ] An applicant without a pursued claim line is reported
 - [ ] Application status, with the number of documents ready out of the total
 - [ ] Copies required on every document
 
@@ -295,7 +298,7 @@ After this milestone the app answers "what is still outstanding on this case?".
 
 - [ ] Case form: status, notes, archive and unarchive
 - [ ] Case list: status filter, archived view, title search, progress beside each case
-- [ ] Claim Lines screen: "Pursue this line", with the pursued line marked
+- [ ] Claim Lines screen grouped by applicant: choose the case's pursued root ancestor, mark each applicant's pursued line with lines to other ancestors dimmed, and choose a path when more than one exists
 - [ ] Applications screen: create and edit applications; each shows its documents in packet order with their readiness and the age of each copy
 - [ ] Deleting an application warns that it is permanent
 
@@ -375,15 +378,15 @@ Scans are attached to documents and can be opened or downloaded one at a time.
 Minor issues found in the October 2026 review. Each is cleared when its file is next touched, and **all must be ticked before the MVP is complete**, whether or not their files were touched along the way. The milestone in brackets is where each is expected to fall.
 
 - [x] Go files formatted to `gofmt` standard (3)
-- [ ] A document cannot be restored from the trash while its person or life event is still in it (3)
-- [ ] Two simultaneous requests cannot give a person a third parent (3)
-- [ ] Lists for a case that does not exist return not found, not an empty list (3)
+- [x] A document cannot be restored from the trash while its person or life event is still in it (3)
+- [x] Two simultaneous requests cannot give a person a third parent (3)
+- [x] Lists for a case that does not exist return not found, not an empty list (3)
 - [ ] Failed requests are not retried when the answer is definite, such as not found (3)
 - [ ] Logging out clears cached data, so the next user on the same browser never sees it (3)
 - [ ] An unknown URL shows a "page not found" screen
 - [ ] After logging in, the user lands on the page they were heading for
 - [ ] A crash in one component shows an error message, not a blank screen
-- [ ] Lists have a stable order when dates are equal or missing
+- [x] Lists have a stable order when dates are equal or missing
 - [ ] Spouse details cannot be saved on events that are not marriages (4)
 - [ ] The overview's list of life events without documents names each event's person (5)
 - [ ] Login takes the same time for an unknown email as for a wrong password (7)

@@ -110,6 +110,9 @@ func (h *Handler) permanentDeleteClaimLine(w http.ResponseWriter, r *http.Reques
 
 func (h *Handler) handleRestore(w http.ResponseWriter, _ *http.Request, fn func() error) {
 	if err := fn(); err != nil {
+		if platform.WriteError(w, err) {
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			platform.Error(w, http.StatusNotFound, "not_found", "Entity not found in trash")
 			return
@@ -122,6 +125,9 @@ func (h *Handler) handleRestore(w http.ResponseWriter, _ *http.Request, fn func(
 
 func (h *Handler) handlePermanentDelete(w http.ResponseWriter, _ *http.Request, fn func() error) {
 	if err := fn(); err != nil {
+		if platform.WriteError(w, err) {
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			platform.Error(w, http.StatusNotFound, "not_found", "Entity not found in trash")
 			return

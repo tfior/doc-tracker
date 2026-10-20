@@ -38,6 +38,10 @@ func (h *Handler) listPeople(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, total, err := h.svc.ListPeople(r.Context(), caseID, page, perPage)
+	if errors.Is(err, ErrNotFound) {
+		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
+		return
+	}
 	if err != nil {
 		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
 		return
@@ -83,6 +87,9 @@ func (h *Handler) createPerson(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := h.svc.CreatePerson(r.Context(), caseID, body.FirstName, body.LastName, input)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
 		return
@@ -130,6 +137,9 @@ func (h *Handler) updatePerson(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := h.svc.UpdatePerson(r.Context(), caseID, personID, input)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
 		return
@@ -147,6 +157,9 @@ func (h *Handler) deletePerson(w http.ResponseWriter, r *http.Request) {
 	personID := r.PathValue("personId")
 
 	err := h.svc.DeletePerson(r.Context(), caseID, personID)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
 		return
@@ -180,12 +193,11 @@ func (h *Handler) addParent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rel, err := h.svc.AddParent(r.Context(), caseID, personID, body.ParentID)
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
+	if platform.WriteError(w, err) {
 		return
 	}
-	if errors.Is(err, ErrConflict) {
-		platform.Error(w, http.StatusConflict, "conflict", "Relationship already exists or parent limit reached")
+	if errors.Is(err, ErrNotFound) {
+		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
 		return
 	}
 	if err != nil {
@@ -202,6 +214,9 @@ func (h *Handler) removeParent(w http.ResponseWriter, r *http.Request) {
 	parentID := r.PathValue("parentId")
 
 	err := h.svc.RemoveParent(r.Context(), caseID, personID, parentID)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Relationship not found")
 		return

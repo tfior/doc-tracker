@@ -121,7 +121,7 @@ The structure is consistent regardless of module size. This makes AI-assisted de
 | `cases` | Case lifecycle and status; whether a Case is active | |
 | `people` | Person records, PersonRelationship; whether a Person is active | |
 | `claimlines` | ClaimLine records and status | |
-| `applications` *(planned)* | Application records and their applicants; deriving an Application's Documents from each applicant's path to the root ancestor, its status, and copies required | Uses `people`, `cases`, and `documents` through interfaces |
+| `applications` *(planned)* | Application records and their applicants; deriving an Application's Documents from each applicant's pursued claim line, its status, and copies required | Uses `people`, `cases`, and `documents` through interfaces |
 | `lifeevents` | LifeEvent records, including shared marriages; whether a LifeEvent is active | |
 | `documents` | Document records, DocumentNamedPerson, FileAttachment, readiness; also hosts `GET /api/v1/document-statuses` until custom status management warrants its own package | Uses `storage` through an interface *(planned)* |
 | `trash` | Trash listing, the 30-day purge, CaseDeletionRecord; coordinates restore and permanent delete | Owns no entity tables. Asks each owning module to restore or delete its own records |
@@ -133,7 +133,7 @@ The structure is consistent regardless of module size. This makes AI-assisted de
 Three rules govern how modules relate to each other's data.
 
 1. **A module is the only writer of its own tables.** No other module inserts, updates, or deletes its rows. When a unit of work spans modules, such as saving a Person together with their birth event, or promoting a spouse to a Person, the service running it asks the owning module to make its part of the change. All parts run in the same transaction.
-2. **A module owns the rules about its own entities.** Whether a Person, LifeEvent, or Case is active, meaning it exists, belongs to the Case, is not trashed, and is not frozen under a trashed parent, is answered by the owning module and nowhere else. Other modules ask; they do not re-derive the answer in their own SQL.
+2. **A module owns the rules about its own entities.** Whether a Person, LifeEvent, or Case is active, meaning it exists, belongs to the Case, is not trashed, and is not frozen under a trashed parent, is answered by the owning module and nowhere else. Other modules ask; they do not re-derive the answer in their own SQL. Each module defines what "active" means for its entities as a database view (`active_people`, `active_documents` and so on), so the definition exists once. Lists read from these views, and active checks lock rows through them.
 3. **Reading across tables in SQL is allowed.** A store may join to another module's tables to assemble what it returns, such as a document list with its status labels. Reads carry no rules of their own, so nothing is duplicated.
 
 ### How modules call each other

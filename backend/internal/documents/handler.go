@@ -59,6 +59,10 @@ func (h *Handler) listDocuments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, total, err := h.svc.ListDocuments(r.Context(), caseID, page, perPage)
+	if errors.Is(err, ErrNotFound) {
+		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
+		return
+	}
 	if err != nil {
 		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
 		return
@@ -123,6 +127,9 @@ func (h *Handler) createDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d, err := h.svc.CreateDocument(r.Context(), caseID, body.PersonID, body.DocumentType, body.Title, input)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Person or life event not found")
 		return
@@ -180,6 +187,9 @@ func (h *Handler) updateDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d, err := h.svc.UpdateDocument(r.Context(), caseID, docID, input)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Document not found")
 		return
@@ -197,6 +207,9 @@ func (h *Handler) deleteDocument(w http.ResponseWriter, r *http.Request) {
 	docID := r.PathValue("docId")
 
 	err := h.svc.DeleteDocument(r.Context(), caseID, docID)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Document not found")
 		return
@@ -234,6 +247,9 @@ func (h *Handler) transitionStatus(w http.ResponseWriter, r *http.Request) {
 		Phase:    body.Phase,
 		StatusID: body.StatusID,
 	})
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Document not found")
 		return
@@ -273,6 +289,9 @@ func (h *Handler) reassignDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d, err := h.svc.ReassignDocument(r.Context(), caseID, docID, input)
+	if platform.WriteError(w, err) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		platform.Error(w, http.StatusNotFound, "not_found", "Document, person, or life event not found")
 		return
