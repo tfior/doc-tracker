@@ -2,9 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet, Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AppShell, NavLink, Title, Group, Anchor, Button, Loader, Center } from '@mantine/core';
-import { Link, useParams } from 'react-router-dom';
 import { AuthProvider } from './features/auth/AuthProvider';
 import { useAuth } from './features/auth/authContext';
 import LoginPage from './features/auth/LoginPage';
@@ -16,6 +15,8 @@ import LifeEventsPage from './features/life-events/LifeEventsPage';
 import ClaimLinesPage from './features/claim-lines/ClaimLinesPage';
 import TrashPage from './features/trash/TrashPage';
 import GlobalTrashPage from './features/trash/GlobalTrashPage';
+import ErrorBoundary from './components/ErrorBoundary';
+import NotFoundPage from './components/NotFoundPage';
 
 function CaseNav() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -26,22 +27,25 @@ function CaseNav() {
       <Anchor component={Link} to={`/cases/${caseId}/life-events`} size="sm">Life Events</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/documents`} size="sm">Documents</Anchor>
       <Anchor component={Link} to={`/cases/${caseId}/claim-lines`} size="sm">Claim Lines</Anchor>
-
       <Anchor component={Link} to={`/cases/${caseId}/trash`} size="sm">Trash</Anchor>
     </Group>
   );
 }
 
+// Sends a signed-out user, or one whose session has expired, to the login
+// screen, remembering where they were heading.
 function RequireAuth() {
   const { authenticated, checking } = useAuth();
+  const location = useLocation();
   if (checking) return <Center h="100vh"><Loader /></Center>;
-  if (!authenticated) return <Navigate to="/login" replace />;
+  if (!authenticated) return <Navigate to="/login" replace state={{ from: location }} />;
   return <Outlet />;
 }
 
 function AppLayout() {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   async function handleLogout() {
     await logout();
@@ -71,7 +75,10 @@ function AppLayout() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        <Outlet />
+        {/* Keyed by page, so moving to another page clears a crash. */}
+        <ErrorBoundary key={pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </AppShell.Main>
     </AppShell>
   );
@@ -108,6 +115,7 @@ export default function App() {
               path="/cases/:caseId/trash"
               element={<><CaseNav /><TrashPage /></>}
             />
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Route>
       </Routes>

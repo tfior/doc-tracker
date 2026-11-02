@@ -37,12 +37,23 @@ func (s *Service) ListPeople(ctx context.Context, caseID string) ([]Person, erro
 	return s.store.ListPeople(ctx, caseID)
 }
 
-// DeletionImpact reports what deleting a person would take with them.
+// DeletionImpact reports what deleting a person would take with them. For an
+// active person, that is what moves to the trash with them; for a person in the
+// trash, everything a permanent delete would remove. The check and the counts
+// run in one transaction, so a trash or restore cannot fall between them.
 func (s *Service) DeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error) {
-	if err := s.store.RequireActive(ctx, caseID, personID); err != nil {
-		return nil, err
-	}
-	return s.store.DeletionImpact(ctx, caseID, personID)
+	var d *DeletionImpact
+	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		err := s.store.RequireActive(ctx, caseID, personID)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			d, err = s.store.TrashedDeletionImpact(ctx, caseID, personID)
+		case err == nil:
+			d, err = s.store.DeletionImpact(ctx, caseID, personID)
+		}
+		return err
+	})
+	return d, err
 }
 
 // RequireActive returns an error wrapping platform.ErrNotFound unless the person
@@ -194,7 +205,23 @@ func (s *Service) setLinks(ctx context.Context, caseID, personID string, parentI
 			return err
 		}
 	}
-	return nil
+
+	// A link belongs to both people it joins, so each person on the other side
+	// of a changed link has changed too (domain model, rule 7). The person
+	// being edited has their own version raised by the edit itself.
+	others := map[string]bool{}
+	for _, l := range append(remove, add...) {
+		for _, id := range []string{l.child, l.parent} {
+			if id != personID {
+				others[id] = true
+			}
+		}
+	}
+	ids := make([]string, 0, len(others))
+	for id := range others {
+		ids = append(ids, id)
+	}
+	return s.store.BumpVersions(ctx, caseID, ids)
 }
 
 // difference returns the IDs in a that are not in b, each once.

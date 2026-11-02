@@ -57,12 +57,23 @@ func (s *Service) ListLifeEvents(ctx context.Context, caseID string) ([]LifeEven
 	return s.store.ListLifeEvents(ctx, caseID)
 }
 
-// DeletionImpact reports what deleting a life event would take with it.
+// DeletionImpact reports what deleting a life event would take with it. For an
+// active event, that is what moves to the trash with it; for an event in the
+// trash, everything a permanent delete would remove. The check and the counts
+// run in one transaction, so a trash or restore cannot fall between them.
 func (s *Service) DeletionImpact(ctx context.Context, caseID, eventID string) (*DeletionImpact, error) {
-	if _, err := s.store.RequireActive(ctx, caseID, eventID); err != nil {
-		return nil, err
-	}
-	return s.store.DeletionImpact(ctx, caseID, eventID)
+	var d *DeletionImpact
+	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		_, err := s.store.RequireActive(ctx, caseID, eventID)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			d, err = s.store.TrashedDeletionImpact(ctx, caseID, eventID)
+		case err == nil:
+			d, err = s.store.DeletionImpact(ctx, caseID, eventID)
+		}
+		return err
+	})
+	return d, err
 }
 
 // RequireActive returns the event's person, or an error wrapping

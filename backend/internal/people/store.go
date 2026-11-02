@@ -27,6 +27,7 @@ type Store interface {
 	ActiveParentIDs(ctx context.Context, personID string) ([]string, error)
 	ActiveChildIDs(ctx context.Context, personID string) ([]string, error)
 	DeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error)
+	TrashedDeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error)
 	LinksOf(ctx context.Context, caseID, personID string) ([]Relationship, error)
 	Get(ctx context.Context, caseID, id string) (*Person, error)
 	LogName(ctx context.Context, caseID, id string) (string, error)
@@ -36,6 +37,7 @@ type Store interface {
 	UpdatePerson(ctx context.Context, caseID, personID string, input UpdatePersonInput) (*Person, error)
 	DeletePerson(ctx context.Context, caseID, personID string) error
 	LockPeople(ctx context.Context, ids ...string) error
+	BumpVersions(ctx context.Context, caseID string, ids []string) error
 	AddParent(ctx context.Context, caseID, personID, parentID string) (*Relationship, error)
 	RemoveParent(ctx context.Context, caseID, personID, parentID string) error
 	RequireActive(ctx context.Context, caseID, personID string) error
@@ -491,4 +493,42 @@ func (s *store) DeletionImpact(ctx context.Context, caseID, personID string) (*D
 		return nil, fmt.Errorf("deletion impact: %w", err)
 	}
 	return &d, nil
+}
+
+// TrashedDeletionImpact counts everything a permanent delete of a person in the
+// trash would remove: all their life events, documents, and the claim lines
+// rooted at them, including any moved to the trash separately. It returns
+// ErrNotFound unless the person is itself in the trash.
+func (s *store) TrashedDeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error) {
+	var d DeletionImpact
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM life_events WHERE person_id = p.id),
+			(SELECT COUNT(*) FROM documents WHERE person_id = p.id),
+			(SELECT COUNT(*) FROM claim_lines WHERE root_person_id = p.id)
+		FROM people p
+		WHERE p.id = $2 AND p.case_id = $1 AND p.deleted_at IS NOT NULL`,
+		caseID, personID,
+	).Scan(&d.LifeEvents, &d.Documents, &d.ClaimLines)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("deletion impact: %w", err)
+	}
+	return &d, nil
+}
+
+// BumpVersions records a change to each of these people, for a family link
+// added to or removed from them by an edit of someone else.
+func (s *store) BumpVersions(ctx context.Context, caseID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`UPDATE people SET updated_at = NOW(), version = version + 1 WHERE case_id = $1 AND id = ANY($2)`,
+		caseID, pq.Array(ids)); err != nil {
+		return fmt.Errorf("bump versions: %w", err)
+	}
+	return nil
 }

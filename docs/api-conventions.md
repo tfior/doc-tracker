@@ -48,7 +48,7 @@ Resources are nested under their owning case.
 - `GET /api/v1/document-statuses` accepts an optional `?phase=` query parameter to filter by phase (`official_copy`, `amendment`, `apostille`, `translation`, `any`). Omitting it returns all statuses.
 - `GET /api/v1/cases/:caseId/trash` lists the trashed entities within a case. `GET /api/v1/trash` lists trashed cases.
 - `GET /api/v1/cases/:caseId/people/:personId/recorded-details` returns everything recorded about a Person, one row per Document
-- `GET /api/v1/cases/:caseId/people/:personId/deletion-impact` and `GET /api/v1/cases/:caseId/life-events/:lifeEventId/deletion-impact` report what deleting the record would take with it, for the confirmation dialog
+- `GET /api/v1/cases/:caseId/people/:personId/deletion-impact` and `GET /api/v1/cases/:caseId/life-events/:lifeEventId/deletion-impact` report what deleting the record would take with it, for the confirmation dialog. For an active record, the counts are what moves to the trash with it, leaving out records already there; for a record in the trash, they are everything a permanent delete would remove
 
 ### Actions
 

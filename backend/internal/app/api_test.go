@@ -439,3 +439,127 @@ func TestDeletionImpact(t *testing.T) {
 		assert.Equal(t, map[string]any{"documents": 0.0}, decode(t, rec))
 	})
 }
+
+func (e *env) impact(t *testing.T, path string) map[string]any {
+	t.Helper()
+	rec := e.c.Do("GET", path+"/deletion-impact", nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	return decode(t, rec)
+}
+
+func (e *env) permanentlyDelete(t *testing.T, path string) {
+	t.Helper()
+	rec := e.c.Do("DELETE", path+"/permanent", nil)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+}
+
+// Scenario 17: for a person in the trash, the counts are everything a permanent
+// delete removes, including records trashed separately beforehand.
+func TestDeletionImpact_TrashedPersonCountsEverythingPermanentlyDeleted(t *testing.T) {
+	e := newEnv(t)
+	c := e.createCase(t)
+	base := "/api/v1/cases/" + c
+	p := e.createPerson(t, c, "Giuseppe")
+	ev1, ev2 := e.createLifeEvent(t, c, p), e.createLifeEvent(t, c, p)
+	e.createDocument(t, c, p, ev1)
+	d2 := e.createDocument(t, c, p, ev1)
+	e.createDocument(t, c, p, ev2)
+	e.createDocument(t, c, p, "")
+	cl1 := e.c.MustCreate(t, base+"/claim-lines", map[string]any{"root_person_id": p})
+	e.trash(t, base+"/claim-lines/"+cl1)
+	e.c.MustCreate(t, base+"/claim-lines", map[string]any{"root_person_id": p})
+	e.trash(t, base+"/documents/"+d2)
+	e.trash(t, base+"/life-events/"+ev2)
+	e.trash(t, base+"/people/"+p)
+
+	got := e.impact(t, base+"/people/"+p)
+	assert.Equal(t, map[string]any{"life_events": 2.0, "documents": 4.0, "claim_lines": 2.0}, got)
+
+	e.permanentlyDelete(t, base+"/people/"+p)
+	assert.Len(t, e.permanentlyDeleted(t, c, "life_event"), int(got["life_events"].(float64)), "life events removed")
+	assert.Len(t, e.permanentlyDeleted(t, c, "document"), int(got["documents"].(float64)), "documents removed")
+	assert.Len(t, e.permanentlyDeleted(t, c, "claim_line"), int(got["claim_lines"].(float64)), "claim lines removed")
+}
+
+// Scenario 18: for a life event in the trash, the count is every document a
+// permanent delete removes, including ones trashed separately.
+func TestDeletionImpact_TrashedLifeEventCountsEverythingPermanentlyDeleted(t *testing.T) {
+	e := newEnv(t)
+	c := e.createCase(t)
+	base := "/api/v1/cases/" + c
+	p := e.createPerson(t, c, "Giuseppe")
+	ev := e.createLifeEvent(t, c, p)
+	e.createDocument(t, c, p, ev)
+	d2 := e.createDocument(t, c, p, ev)
+	e.trash(t, base+"/documents/"+d2)
+	e.trash(t, base+"/life-events/"+ev)
+
+	got := e.impact(t, base+"/life-events/"+ev)
+	assert.Equal(t, map[string]any{"documents": 2.0}, got)
+
+	e.permanentlyDelete(t, base+"/life-events/"+ev)
+	assert.Len(t, e.permanentlyDeleted(t, c, "document"), 2, "documents removed")
+}
+
+// Scenario 19: for an active record, records already in the trash are not
+// counted, since they do not move.
+func TestDeletionImpact_ActiveRecordLeavesOutTrashedChildren(t *testing.T) {
+	e := newEnv(t)
+	c := e.createCase(t)
+	base := "/api/v1/cases/" + c
+	p := e.createPerson(t, c, "Giuseppe")
+	ev1, ev2 := e.createLifeEvent(t, c, p), e.createLifeEvent(t, c, p)
+	e.createDocument(t, c, p, ev1)
+	d2 := e.createDocument(t, c, p, ev1)
+	cl1 := e.c.MustCreate(t, base+"/claim-lines", map[string]any{"root_person_id": p})
+	e.trash(t, base+"/claim-lines/"+cl1)
+	e.c.MustCreate(t, base+"/claim-lines", map[string]any{"root_person_id": p})
+	e.trash(t, base+"/documents/"+d2)
+	e.trash(t, base+"/life-events/"+ev2)
+
+	assert.Equal(t, map[string]any{"life_events": 1.0, "documents": 1.0, "claim_lines": 1.0}, e.impact(t, base+"/people/"+p))
+	assert.Equal(t, map[string]any{"documents": 1.0}, e.impact(t, base+"/life-events/"+ev1))
+}
+
+// Scenario 20: a record beneath something in the trash, but not in the trash
+// itself, cannot be deleted on its own, so there is nothing to report.
+func TestDeletionImpact_BeneathTrashedParentNotFound(t *testing.T) {
+	e := newEnv(t)
+	c := e.createCase(t)
+	base := "/api/v1/cases/" + c
+	p := e.createPerson(t, c, "Giuseppe")
+	ev := e.createLifeEvent(t, c, p)
+	e.trash(t, base+"/people/"+p)
+
+	rec := e.c.Do("GET", base+"/life-events/"+ev+"/deletion-impact", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+}
+
+// Scenario 21: a family link belongs to both people it joins, so changing it
+// raises both versions. A stale save of the other person is then refused
+// instead of silently removing the link.
+func TestFamilyLink_RaisesBothVersions(t *testing.T) {
+	e := newEnv(t)
+	c := e.createCase(t)
+	x, carlo := e.createPerson(t, c, "Giuseppe"), e.createPerson(t, c, "Carlo")
+	xPath := "/api/v1/cases/" + c + "/people/" + x
+	carloPath := "/api/v1/cases/" + c + "/people/" + carlo
+
+	rec := e.c.Do("PATCH", carloPath, map[string]any{"version": 1, "parent_ids": []string{x}})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 2, version(t, e.get(t, c, "people", carlo)))
+	assert.Equal(t, 2, version(t, e.get(t, c, "people", x)), "the parent's version did not rise")
+
+	// A save of X based on the version from before the link, with the child list as it was then.
+	rec = e.c.Do("PATCH", xPath, map[string]any{"version": 1, "child_ids": []string{}})
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "version_conflict", decode(t, rec)["error"].(map[string]any)["code"])
+	assert.Equal(t, []string{x}, e.parentIDs(t, c, carlo), "the link was removed by a stale save")
+
+	t.Run("removing a link raises both too", func(t *testing.T) {
+		rec := e.c.Do("PATCH", carloPath, map[string]any{"version": 2, "parent_ids": []string{}})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Equal(t, 3, version(t, e.get(t, c, "people", carlo)))
+		assert.Equal(t, 3, version(t, e.get(t, c, "people", x)))
+	})
+}

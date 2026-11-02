@@ -18,6 +18,7 @@ var ErrNotFound = fmt.Errorf("life event %w", platform.ErrNotFound)
 
 type Store interface {
 	DeletionImpact(ctx context.Context, caseID, eventID string) (*DeletionImpact, error)
+	TrashedDeletionImpact(ctx context.Context, caseID, eventID string) (*DeletionImpact, error)
 	IDsForPerson(ctx context.Context, caseID, personID string) ([]string, error)
 	Get(ctx context.Context, caseID, id string) (*LifeEvent, error)
 	LogName(ctx context.Context, caseID, id string) (string, error)
@@ -350,6 +351,26 @@ func (s *store) DeletionImpact(ctx context.Context, caseID, eventID string) (*De
 		`SELECT COUNT(*) FROM active_documents WHERE case_id = $1 AND life_event_id = $2`,
 		caseID, eventID,
 	).Scan(&d.Documents)
+	if err != nil {
+		return nil, fmt.Errorf("deletion impact: %w", err)
+	}
+	return &d, nil
+}
+
+// TrashedDeletionImpact counts every document a permanent delete of a life
+// event in the trash would remove, including any moved to the trash
+// separately. It returns ErrNotFound unless the event is itself in the trash.
+func (s *store) TrashedDeletionImpact(ctx context.Context, caseID, eventID string) (*DeletionImpact, error) {
+	var d DeletionImpact
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM documents WHERE life_event_id = le.id)
+		FROM life_events le
+		WHERE le.id = $2 AND le.case_id = $1 AND le.deleted_at IS NOT NULL`,
+		caseID, eventID,
+	).Scan(&d.Documents)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
 	if err != nil {
 		return nil, fmt.Errorf("deletion impact: %w", err)
 	}

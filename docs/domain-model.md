@@ -355,7 +355,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 4. PersonRelationship is parent-child only.
 5. Person records are scoped per case for MVP.
 6. A Person's birth and death facts live on LifeEvents. A Person has at most one birth event and at most one death event.
-7. Case, Person, LifeEvent, Document, ClaimLine, and Application each carry a `version` that increases on every change. A change must state the version it was based on. If the record has changed since, the change is refused and nothing is saved, so one user's save never silently overwrites another's.
+7. Case, Person, LifeEvent, Document, ClaimLine, and Application each carry a `version` that increases on every change. A change must state the version it was based on. If the record has changed since, the change is refused and nothing is saved, so one user's save never silently overwrites another's. A family link belongs to both people it joins, so adding or removing one counts as a change to both.
 
 ### Cases
 

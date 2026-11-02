@@ -28,13 +28,13 @@ func Middleware(svc *Service) func(http.Handler) http.Handler {
 
 			cookie, err := r.Cookie(cookieName)
 			if err != nil {
-				platform.Error(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+				platform.Error(w, http.StatusUnauthorized, "unauthorized", "Your session has ended. Sign in again.")
 				return
 			}
 
 			sess, ok := svc.GetSession(cookie.Value)
 			if !ok {
-				platform.Error(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+				platform.Error(w, http.StatusUnauthorized, "unauthorized", "Your session has ended. Sign in again.")
 				return
 			}
 

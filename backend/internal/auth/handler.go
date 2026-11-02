@@ -35,17 +35,17 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
+		platform.Error(w, http.StatusBadRequest, "invalid_input", "The request body is not valid JSON.")
 		return
 	}
 	if body.Email == "" || body.Password == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "email and password are required")
+		platform.Error(w, http.StatusBadRequest, "invalid_input", "Enter your email and password.")
 		return
 	}
 
 	token, err := h.svc.Login(r.Context(), body.Email, body.Password)
 	if errors.Is(err, ErrInvalidCredentials) {
-		platform.Error(w, http.StatusUnauthorized, "unauthorized", "invalid email or password")
+		platform.Error(w, http.StatusUnauthorized, "unauthorized", "The email or password is incorrect.")
 		return
 	}
 	if err != nil {
