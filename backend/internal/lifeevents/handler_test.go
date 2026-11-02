@@ -35,7 +35,7 @@ func newTestEnv(t *testing.T) *testEnv {
 }
 
 func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	return e.c.Do(method, path, body)
+	return e.c.DoV(method, path, body)
 }
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
@@ -376,7 +376,7 @@ func TestDeleteLifeEvent_WrongCase(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// PATCH /api/v1/cases/:caseId/life-events/:eventId/person (reassign)
+// Reassignment, through PATCH /api/v1/cases/:caseId/life-events/:eventId (reassign)
 // ---------------------------------------------------------------------------
 
 func TestReassignLifeEvent_Valid(t *testing.T) {
@@ -386,7 +386,7 @@ func TestReassignLifeEvent_Valid(t *testing.T) {
 	p2 := env.createPerson(t, c.ID)
 	le := env.createLifeEvent(t, c.ID, p1.ID, "birth")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/"+le.ID+"/person", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/"+le.ID, map[string]any{
 		"person_id": p2.ID,
 	})
 
@@ -402,7 +402,7 @@ func TestReassignLifeEvent_SamePerson(t *testing.T) {
 	p := env.createPerson(t, c.ID)
 	le := env.createLifeEvent(t, c.ID, p.ID, "birth")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/"+le.ID+"/person", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/"+le.ID, map[string]any{
 		"person_id": p.ID,
 	})
 
@@ -420,7 +420,7 @@ func TestReassignLifeEvent_PersonNotInCase(t *testing.T) {
 	p2 := env.createPerson(t, caseB.ID)
 	le := env.createLifeEvent(t, caseA.ID, p1.ID, "birth")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+caseA.ID+"/life-events/"+le.ID+"/person", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+caseA.ID+"/life-events/"+le.ID, map[string]any{
 		"person_id": p2.ID,
 	})
 
@@ -433,7 +433,7 @@ func TestReassignLifeEvent_PersonNotFound(t *testing.T) {
 	p := env.createPerson(t, c.ID)
 	le := env.createLifeEvent(t, c.ID, p.ID, "birth")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/"+le.ID+"/person", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/"+le.ID, map[string]any{
 		"person_id": "00000000-0000-0000-0000-000000000000",
 	})
 
@@ -445,7 +445,7 @@ func TestReassignLifeEvent_EventNotFound(t *testing.T) {
 	c := env.createCase(t)
 	p := env.createPerson(t, c.ID)
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/00000000-0000-0000-0000-000000000000/person", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/00000000-0000-0000-0000-000000000000", map[string]any{
 		"person_id": p.ID,
 	})
 
@@ -467,7 +467,7 @@ func TestReassignLifeEvent_EventWrongCase(t *testing.T) {
 	p2 := env.createPerson(t, caseB.ID)
 	le := env.createLifeEvent(t, caseA.ID, p1.ID, "birth")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+caseB.ID+"/life-events/"+le.ID+"/person", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+caseB.ID+"/life-events/"+le.ID, map[string]any{
 		"person_id": p2.ID,
 	})
 

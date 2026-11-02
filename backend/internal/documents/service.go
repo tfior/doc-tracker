@@ -43,11 +43,11 @@ func NewService(store Store, db *sql.DB, log *activitylog.Service, cases CaseChe
 	return &Service{store: store, db: db, log: log, rec: log.For("document", store.LogName), cases: cases, people: people, lifeEvents: lifeEvents}
 }
 
-func (s *Service) ListDocuments(ctx context.Context, caseID string, page, perPage int) ([]Document, int, error) {
+func (s *Service) ListDocuments(ctx context.Context, caseID string) ([]Document, error) {
 	if err := s.cases.RequireActive(ctx, caseID); err != nil {
-		return nil, 0, platform.MapNotFound(err, ErrNotFound)
+		return nil, platform.MapNotFound(err, ErrNotFound)
 	}
-	return s.store.ListDocuments(ctx, caseID, page, perPage)
+	return s.store.ListDocuments(ctx, caseID)
 }
 
 func (s *Service) ListDocumentStatuses(ctx context.Context, phase string) ([]DocumentStatus, error) {
@@ -87,15 +87,39 @@ func (s *Service) CreateDocument(ctx context.Context, caseID, personID, docType,
 	return d, err
 }
 
+// UpdateDocument changes a document in one unit of work: its details, its
+// person and life event, and any of its four phase statuses. If any part is
+// invalid, nothing is saved.
 func (s *Service) UpdateDocument(ctx context.Context, caseID, docID string, input UpdateDocumentInput) (*Document, error) {
 	var d *Document
 	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
-		if _, err := s.store.LockActive(ctx, caseID, docID); err != nil {
+		currentPerson, err := s.store.LockActive(ctx, caseID, docID)
+		if err != nil {
 			return err
 		}
 		before, err := s.store.Get(ctx, caseID, docID)
 		if err != nil {
 			return err
+		}
+		if err := platform.CheckVersion(before.Version, input.Version); err != nil {
+			return err
+		}
+		if err := s.checkStatuses(ctx, input); err != nil {
+			return err
+		}
+		if input.PersonID != nil || input.LifeEventID.Set {
+			person := currentPerson
+			if input.PersonID != nil {
+				person = *input.PersonID
+			}
+			// Moving to another person without naming a life event ungroups
+			// the document, so it is never left under the old person's event.
+			if !input.LifeEventID.Set && person != currentPerson {
+				input.LifeEventID = platform.NullString{Set: true}
+			}
+			if err := s.requireParents(ctx, caseID, person, input.LifeEventID); err != nil {
+				return err
+			}
 		}
 		if d, err = s.store.UpdateDocument(ctx, caseID, docID, input); err != nil {
 			return err
@@ -105,9 +129,42 @@ func (s *Service) UpdateDocument(ctx context.Context, caseID, docID string, inpu
 	return d, err
 }
 
-func (s *Service) DeleteDocument(ctx context.Context, caseID, docID string) error {
+// checkStatuses reports every supplied status that does not belong to its phase.
+func (s *Service) checkStatuses(ctx context.Context, input UpdateDocumentInput) error {
+	var v platform.Validator
+	for _, st := range []struct {
+		field, phase string
+		id           *string
+	}{
+		{"official_copy_status_id", "official_copy", input.OfficialCopyStatusID},
+		{"amendment_status_id", "amendment", input.AmendmentStatusID},
+		{"apostille_status_id", "apostille", input.ApostilleStatusID},
+		{"translation_status_id", "translation", input.TranslationStatusID},
+	} {
+		if st.id == nil {
+			continue
+		}
+		phase, err := s.store.StatusPhase(ctx, *st.id)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err != nil || (phase != st.phase && phase != "any") {
+			v.Add(st.field, "invalid_value", "This status is not available for this phase.")
+		}
+	}
+	return v.Err()
+}
+
+func (s *Service) DeleteDocument(ctx context.Context, caseID, docID string, version int) error {
 	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
 		if _, err := s.store.LockActive(ctx, caseID, docID); err != nil {
+			return err
+		}
+		before, err := s.store.Get(ctx, caseID, docID)
+		if err != nil {
+			return err
+		}
+		if err := platform.CheckVersion(before.Version, version); err != nil {
 			return err
 		}
 		if err := s.store.DeleteDocument(ctx, caseID, docID); err != nil {
@@ -115,51 +172,6 @@ func (s *Service) DeleteDocument(ctx context.Context, caseID, docID string) erro
 		}
 		return s.rec.Record(ctx, caseID, "deleted", docID, nil)
 	})
-}
-
-func (s *Service) TransitionStatus(ctx context.Context, caseID, docID string, input TransitionStatusInput) (*Document, error) {
-	var d *Document
-	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
-		if _, err := s.store.LockActive(ctx, caseID, docID); err != nil {
-			return err
-		}
-		before, err := s.store.Get(ctx, caseID, docID)
-		if err != nil {
-			return err
-		}
-		if d, err = s.store.TransitionStatus(ctx, caseID, docID, input); err != nil {
-			return err
-		}
-		return s.rec.Record(ctx, caseID, "updated", docID, activitylog.Diff(before.logFields(), d.logFields()))
-	})
-	return d, err
-}
-
-func (s *Service) ReassignDocument(ctx context.Context, caseID, docID string, input ReassignDocumentInput) (*Document, error) {
-	var d *Document
-	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
-		currentPerson, err := s.store.LockActive(ctx, caseID, docID)
-		if err != nil {
-			return err
-		}
-		if err := s.requireParents(ctx, caseID, input.PersonID, input.LifeEventID); err != nil {
-			return err
-		}
-		before, err := s.store.Get(ctx, caseID, docID)
-		if err != nil {
-			return err
-		}
-		// Moving to another person without naming a life event ungroups the
-		// document, so it is never left under the old person's event.
-		if !input.LifeEventID.Set && input.PersonID != currentPerson {
-			input.LifeEventID = platform.NullString{Set: true}
-		}
-		if d, err = s.store.ReassignDocument(ctx, caseID, docID, input); err != nil {
-			return err
-		}
-		return s.rec.Record(ctx, caseID, "updated", docID, activitylog.Diff(before.logFields(), d.logFields()))
-	})
-	return d, err
 }
 
 // LockEventDocuments locks every document under a life event. The lifeevents

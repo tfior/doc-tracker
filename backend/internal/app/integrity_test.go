@@ -7,6 +7,7 @@ package app_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,15 +37,18 @@ func errorBody(t *testing.T, rec *httptest.ResponseRecorder) (code, message stri
 	return body.Error.Code, body.Error.Message
 }
 
-func (e *env) addParent(caseID, childID, parentID string) *httptest.ResponseRecorder {
-	return e.c.Do("POST", "/api/v1/cases/"+caseID+"/people/"+childID+"/relationships",
-		map[string]any{"parent_id": parentID})
+// addParent adds one parent to a person, keeping their existing parents, by
+// sending the person's full parent list through the person update.
+func (e *env) addParent(t *testing.T, caseID, childID, parentID string) *httptest.ResponseRecorder {
+	t.Helper()
+	parents := append(e.parentIDs(t, caseID, childID), parentID)
+	return e.c.DoV("PATCH", "/api/v1/cases/"+caseID+"/people/"+childID, map[string]any{"parent_ids": parents})
 }
 
 func (e *env) mustAddParent(t *testing.T, caseID, childID, parentID string) {
 	t.Helper()
-	rec := e.addParent(caseID, childID, parentID)
-	require.Equal(t, http.StatusCreated, rec.Code, "setup: add parent: %s", rec.Body.String())
+	rec := e.addParent(t, caseID, childID, parentID)
+	require.Equal(t, http.StatusOK, rec.Code, "setup: add parent: %s", rec.Body.String())
 }
 
 func (e *env) createLifeEvent(t *testing.T, caseID, personID string) string {
@@ -98,7 +102,7 @@ func TestParentLinks_DirectLoopRefused(t *testing.T) {
 	a, b := e.createPerson(t, c, "A"), e.createPerson(t, c, "B")
 	e.mustAddParent(t, c, b, a) // A is B's parent
 
-	rec := e.addParent(c, a, b) // B as A's parent would make A their own ancestor
+	rec := e.addParent(t, c, a, b) // B as A's parent would make A their own ancestor
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
 	code, _ := errorBody(t, rec)
@@ -114,7 +118,7 @@ func TestParentLinks_LongerLoopRefused(t *testing.T) {
 	e.mustAddParent(t, c, b, a)  // A -> B
 	e.mustAddParent(t, c, cc, b) // B -> C
 
-	rec := e.addParent(c, a, cc) // C as A's parent closes the loop
+	rec := e.addParent(t, c, a, cc) // C as A's parent closes the loop
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
 	assert.Empty(t, e.parentIDs(t, c, a))
@@ -129,8 +133,8 @@ func TestParentLinks_DeepTreeAccepted(t *testing.T) {
 		e.createPerson(t, c, "Carlo"), e.createPerson(t, c, "Linda")
 	e.mustAddParent(t, c, child, parent)
 
-	assert.Equal(t, http.StatusCreated, e.addParent(c, parent, grandparent).Code, "grandparent above an existing parent")
-	assert.Equal(t, http.StatusCreated, e.addParent(c, child, otherParent).Code, "second parent")
+	assert.Equal(t, http.StatusOK, e.addParent(t, c, parent, grandparent).Code, "grandparent above an existing parent")
+	assert.Equal(t, http.StatusOK, e.addParent(t, c, child, otherParent).Code, "second parent")
 	assert.ElementsMatch(t, []string{parent, otherParent}, e.parentIDs(t, c, child))
 }
 
@@ -143,9 +147,9 @@ func TestParentLinks_LimitIgnoresTrashedParent(t *testing.T) {
 	e.mustAddParent(t, c, child, p2)
 	e.trash(t, "/api/v1/cases/"+c+"/people/"+p2)
 
-	rec := e.addParent(c, child, p3)
+	rec := e.addParent(t, c, child, p3)
 
-	assert.Equal(t, http.StatusCreated, rec.Code, "the visible parent count is one, so a second may be added: %s", rec.Body.String())
+	assert.Equal(t, http.StatusOK, rec.Code, "the visible parent count is one, so a second may be added: %s", rec.Body.String())
 	assert.ElementsMatch(t, []string{p1, p3}, e.parentIDs(t, c, child))
 }
 
@@ -167,7 +171,9 @@ func TestParentLinks_RestoringWouldExceedLimit_Refused(t *testing.T) {
 }
 
 // Scenario 5. Concurrency is not deterministic, so the race is attempted many
-// times; any attempt that ends with three parents fails the test.
+// times; any attempt that ends with three parents fails the test. Each request
+// updates a different parent, adding the same child, so the two are not
+// stopped by the version check and really do race on the two-parent limit.
 func TestParentLinks_SimultaneousAddsCannotExceedLimit(t *testing.T) {
 	e := newEnv(t)
 	for round := 0; round < 20; round++ {
@@ -183,14 +189,15 @@ func TestParentLinks_SimultaneousAddsCannotExceedLimit(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				codes[i] = e.addParent(c, child, parent).Code
+				codes[i] = e.c.Do("PATCH", "/api/v1/cases/"+c+"/people/"+parent,
+					map[string]any{"version": 1, "child_ids": []string{child}}).Code
 			}()
 		}
 		close(start)
 		wg.Wait()
 
 		require.Len(t, e.parentIDs(t, c, child), 2, "round %d: a person ended up with more than two parents (statuses %v)", round, codes)
-		assert.ElementsMatch(t, []int{http.StatusCreated, http.StatusConflict}, codes, "round %d", round)
+		assert.ElementsMatch(t, []int{http.StatusOK, http.StatusConflict}, codes, "round %d", round)
 	}
 }
 
@@ -206,7 +213,7 @@ func TestReassignLifeEvent_MovesItsDocuments(t *testing.T) {
 	ev := e.createLifeEvent(t, c, a)
 	doc := e.createDocument(t, c, a, ev)
 
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+c+"/life-events/"+ev+"/person", map[string]any{"person_id": b})
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+c+"/life-events/"+ev, map[string]any{"person_id": b})
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	d := findByID(e.list(t, "/api/v1/cases/"+c+"/documents"), doc)
@@ -234,7 +241,7 @@ func TestDocument_LifeEventOfAnotherPerson_Refused(t *testing.T) {
 
 	t.Run("reassign", func(t *testing.T) {
 		doc := e.createDocument(t, c, a, "")
-		rec := e.c.Do("PATCH", "/api/v1/cases/"+c+"/documents/"+doc+"/parent", map[string]any{
+		rec := e.c.DoV("PATCH", "/api/v1/cases/"+c+"/documents/"+doc, map[string]any{
 			"person_id": a, "life_event_id": evB,
 		})
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -252,7 +259,7 @@ func TestReassignDocument_ToAnotherPersonWithoutEvent_Ungroups(t *testing.T) {
 	evA := e.createLifeEvent(t, c, a)
 	doc := e.createDocument(t, c, a, evA)
 
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+c+"/documents/"+doc+"/parent", map[string]any{"person_id": b})
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+c+"/documents/"+doc, map[string]any{"person_id": b})
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	d := findByID(e.list(t, "/api/v1/cases/"+c+"/documents"), doc)
@@ -343,20 +350,20 @@ func TestWritesBeneathTrash_Refused(t *testing.T) {
 		body               any
 	}{
 		{"edit a document of a trashed person", "PATCH", "/api/v1/cases/" + c + "/documents/" + doc, map[string]any{"title": "x"}},
-		{"change a status of that document", "PATCH", "/api/v1/cases/" + c + "/documents/" + doc + "/status", map[string]any{"phase": "official_copy", "status_id": statusID}},
+		{"change a status of that document", "PATCH", "/api/v1/cases/" + c + "/documents/" + doc, map[string]any{"official_copy_status_id": statusID}},
 		{"edit a life event of a trashed person", "PATCH", "/api/v1/cases/" + c + "/life-events/" + ev, map[string]any{"event_place": "x"}},
 		{"create a life event under a trashed person", "POST", "/api/v1/cases/" + c + "/life-events", map[string]any{"person_id": p, "event_type": "death"}},
 		{"create a document under a trashed person", "POST", "/api/v1/cases/" + c + "/documents", map[string]any{"person_id": p, "document_type": "other", "title": "x"}},
 		{"create a document under a trashed life event", "POST", "/api/v1/cases/" + c + "/documents", map[string]any{"person_id": other, "life_event_id": evOther, "document_type": "other", "title": "x"}},
-		{"give a trashed person a parent", "POST", "/api/v1/cases/" + c + "/people/" + p + "/relationships", map[string]any{"parent_id": other}},
-		{"make a trashed person someone's parent", "POST", "/api/v1/cases/" + c + "/people/" + other + "/relationships", map[string]any{"parent_id": p}},
+		{"give a trashed person a parent", "PATCH", "/api/v1/cases/" + c + "/people/" + p, map[string]any{"parent_ids": []string{other}}},
+		{"make a trashed person someone's parent", "PATCH", "/api/v1/cases/" + c + "/people/" + other, map[string]any{"parent_ids": []string{p}}},
 		{"create a person in a trashed case", "POST", "/api/v1/cases/" + tc + "/people", map[string]any{"first_name": "x", "last_name": "y"}},
 		{"edit a person in a trashed case", "PATCH", "/api/v1/cases/" + tc + "/people/" + tp, map[string]any{"notes": "x"}},
 		{"create a claim line in a trashed case", "POST", "/api/v1/cases/" + tc + "/claim-lines", map[string]any{"root_person_id": tp}},
 	}
 	for _, w := range writes {
 		t.Run(w.name, func(t *testing.T) {
-			rec := e.c.Do(w.method, w.path, w.body)
+			rec := e.c.DoV(w.method, w.path, w.body)
 			assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 		})
 	}
@@ -375,7 +382,7 @@ func TestRestoringParent_BringsEverythingBack(t *testing.T) {
 
 	assert.Contains(t, ids(e.list(t, "/api/v1/cases/"+c+"/life-events")), ev)
 	assert.Contains(t, ids(e.list(t, "/api/v1/cases/"+c+"/documents")), doc)
-	assert.Equal(t, http.StatusOK, e.c.Do("PATCH", "/api/v1/cases/"+c+"/documents/"+doc, map[string]any{"title": "Edited"}).Code)
+	assert.Equal(t, http.StatusOK, e.c.DoV("PATCH", "/api/v1/cases/"+c+"/documents/"+doc, map[string]any{"title": "Edited"}).Code)
 }
 
 // Scenario 14
@@ -488,7 +495,7 @@ func TestPermanentDeleteLifeEvent_DeletesItsDocuments(t *testing.T) {
 	doc := e.createDocument(t, c, p, ev)
 	e.trash(t, "/api/v1/cases/"+c+"/life-events/"+ev)
 
-	require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", "/api/v1/cases/"+c+"/life-events/"+ev+"/permanent", nil).Code)
+	require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", "/api/v1/cases/"+c+"/life-events/"+ev+"/permanent", nil).Code)
 
 	var count int
 	require.NoError(t, e.db.QueryRow(`SELECT COUNT(*) FROM documents WHERE id = $1`, doc).Scan(&count))
@@ -527,9 +534,10 @@ func (e *env) anyStatusID(t *testing.T, phase string) string {
 }
 
 // Follows from the locking added for scenarios 5 and 15: two simultaneous
-// edits of the same record must both succeed, one after the other. Without an
-// exclusive lock taken first, they deadlock and one fails with a server error.
-func TestSimultaneousEditsOfOneRecord_BothSucceed(t *testing.T) {
+// edits of the same record must never deadlock, which would surface as a server
+// error. Both are based on the same version, so one is saved and the other is
+// refused as a version conflict.
+func TestSimultaneousEditsOfOneRecord_NoServerError(t *testing.T) {
 	e := newEnv(t)
 	c := e.createCase(t)
 	p := e.createPerson(t, c, "Giuseppe")
@@ -537,28 +545,24 @@ func TestSimultaneousEditsOfOneRecord_BothSucceed(t *testing.T) {
 	status := e.anyStatusID(t, "official_copy")
 
 	for round := 0; round < 10; round++ {
+		version := version(t, e.get(t, c, "documents", doc))
 		var wg sync.WaitGroup
 		start := make(chan struct{})
-		requests := []func() int{
-			func() int {
-				return e.c.Do("PATCH", "/api/v1/cases/"+c+"/documents/"+doc, map[string]any{"title": "Edited"}).Code
-			},
-			func() int {
-				return e.c.Do("PATCH", "/api/v1/cases/"+c+"/documents/"+doc+"/status",
-					map[string]any{"phase": "official_copy", "status_id": status}).Code
-			},
+		bodies := []map[string]any{
+			{"version": version, "title": fmt.Sprintf("Edited %d", round)},
+			{"version": version, "official_copy_status_id": status, "notes": fmt.Sprintf("round %d", round)},
 		}
-		codes := make([]int, len(requests))
-		for i, req := range requests {
+		codes := make([]int, len(bodies))
+		for i, body := range bodies {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				<-start
-				codes[i] = req()
+				codes[i] = e.c.Do("PATCH", "/api/v1/cases/"+c+"/documents/"+doc, body).Code
 			}()
 		}
 		close(start)
 		wg.Wait()
-		require.Equal(t, []int{http.StatusOK, http.StatusOK}, codes, "round %d", round)
+		require.ElementsMatch(t, []int{http.StatusOK, http.StatusConflict}, codes, "round %d", round)
 	}
 }

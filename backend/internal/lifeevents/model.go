@@ -23,11 +23,14 @@ type LifeEvent struct {
 	SpouseBirthPlace *string   `json:"spouse_birth_place"`
 	Notes            *string   `json:"notes"`
 	HasDocuments     bool      `json:"has_documents"`
+	Version          int       `json:"version"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type UpdateLifeEventInput struct {
+	Version          int     // the version the change is based on; unused on create
+	PersonID         *string // moves the event, and its documents, to another person
 	EventType        *string
 	EventDate        platform.NullString
 	EventPlace       platform.NullString
@@ -49,4 +52,9 @@ func (le *LifeEvent) logFields() activitylog.Fields {
 		"spouse_birth_place": activitylog.Value(le.SpouseBirthPlace),
 		"notes":              activitylog.Value(le.Notes),
 	}
+}
+
+// DeletionImpact is what deleting a life event would take with it.
+type DeletionImpact struct {
+	Documents int `json:"documents"`
 }

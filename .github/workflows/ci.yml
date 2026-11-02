@@ -60,6 +60,19 @@ jobs:
           DB_PASSWORD: ci
           TEST_DB_NAME: doctracker_test
 
+      - name: Check schema snapshot
+        run: |
+          make schema
+          if ! git diff --exit-code backend/db/schema.sql; then
+            echo "backend/db/schema.sql does not match the migrations. Run 'make schema' and commit the result."
+            exit 1
+          fi
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: doctracker
+          DB_PASSWORD: ci
+
   frontend:
     runs-on: ubuntu-latest
 

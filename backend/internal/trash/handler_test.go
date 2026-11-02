@@ -38,7 +38,7 @@ func newTestEnv(t *testing.T) *testEnv {
 }
 
 func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	return e.c.Do(method, path, body)
+	return e.c.DoV(method, path, body)
 }
 
 // ---------------------------------------------------------------------------

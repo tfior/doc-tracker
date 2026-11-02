@@ -45,7 +45,7 @@ func (s *store) ListCases(ctx context.Context, page, perPage int) ([]Case, int, 
 
 	offset := (page - 1) * perPage
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
-		SELECT id::text, title, status::text, primary_root_person_id::text, created_at, updated_at
+		SELECT id::text, title, status::text, primary_root_person_id::text, version, created_at, updated_at
 		FROM cases
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC, id DESC
@@ -60,7 +60,7 @@ func (s *store) ListCases(ctx context.Context, page, perPage int) ([]Case, int, 
 	for rows.Next() {
 		var c Case
 		var primaryRootPersonID sql.NullString
-		if err := rows.Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.Version, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan case: %w", err)
 		}
 		if primaryRootPersonID.Valid {
@@ -85,7 +85,7 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 			c.title,
 			c.status::text,
 			c.primary_root_person_id::text,
-			c.created_at,
+			c.version, c.created_at,
 			c.updated_at,
 			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'not_yet_researched') AS cl_not_yet_researched,
 			COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'researching')       AS cl_researching,
@@ -99,7 +99,7 @@ func (s *store) GetCase(ctx context.Context, caseID string) (*CaseDetail, error)
 		GROUP BY c.id`,
 		caseID,
 	).Scan(
-		&d.ID, &d.Title, &d.Status, &primaryRootPersonID, &d.CreatedAt, &d.UpdatedAt,
+		&d.ID, &d.Title, &d.Status, &primaryRootPersonID, &d.Version, &d.CreatedAt, &d.UpdatedAt,
 		&d.ClaimLineSummary.NotYetResearched, &d.ClaimLineSummary.Researching,
 		&d.ClaimLineSummary.Paused, &d.ClaimLineSummary.Ineligible, &d.ClaimLineSummary.Eligible,
 	)
@@ -125,9 +125,9 @@ func (s *store) CreateCase(ctx context.Context, title string) (*Case, error) {
 	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		INSERT INTO cases (title)
 		VALUES ($1)
-		RETURNING id::text, title, status::text, primary_root_person_id::text, created_at, updated_at`,
+		RETURNING id::text, title, status::text, primary_root_person_id::text, version, created_at, updated_at`,
 		title,
-	).Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.CreatedAt, &c.UpdatedAt)
+	).Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.Version, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert case: %w", err)
 	}
@@ -145,11 +145,11 @@ func (s *store) UpdateCase(ctx context.Context, caseID string, title *string, st
 		SET
 			title      = COALESCE($2, title),
 			status     = COALESCE($3::case_status, status),
-			updated_at = NOW()
+			updated_at = NOW(), version = version + 1
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id::text, title, status::text, primary_root_person_id::text, created_at, updated_at`,
+		RETURNING id::text, title, status::text, primary_root_person_id::text, version, created_at, updated_at`,
 		caseID, title, status,
-	).Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.CreatedAt, &c.UpdatedAt)
+	).Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.Version, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -164,7 +164,7 @@ func (s *store) UpdateCase(ctx context.Context, caseID string, title *string, st
 
 func (s *store) DeleteCase(ctx context.Context, caseID string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
-		UPDATE cases SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`,
+		UPDATE cases SET deleted_at = NOW(), version = version + 1 WHERE id = $1 AND deleted_at IS NULL`,
 		caseID,
 	)
 	if err != nil {
@@ -182,7 +182,7 @@ func (s *store) DeleteCase(ctx context.Context, caseID string) error {
 
 func (s *store) RestoreCase(ctx context.Context, caseID string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
-		`UPDATE cases SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL`, caseID)
+		`UPDATE cases SET deleted_at = NULL, version = version + 1 WHERE id = $1 AND deleted_at IS NOT NULL`, caseID)
 	if err != nil {
 		return fmt.Errorf("restore case: %w", err)
 	}
@@ -251,9 +251,9 @@ func (s *store) Get(ctx context.Context, caseID string) (*Case, error) {
 	var c Case
 	var primaryRootPersonID sql.NullString
 	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
-		SELECT id::text, title, status::text, primary_root_person_id::text, created_at, updated_at
+		SELECT id::text, title, status::text, primary_root_person_id::text, version, created_at, updated_at
 		FROM cases WHERE id = $1 AND deleted_at IS NULL`, caseID,
-	).Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.CreatedAt, &c.UpdatedAt)
+	).Scan(&c.ID, &c.Title, &c.Status, &primaryRootPersonID, &c.Version, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

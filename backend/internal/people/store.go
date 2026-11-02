@@ -24,15 +24,20 @@ const (
 )
 
 type Store interface {
+	ActiveParentIDs(ctx context.Context, personID string) ([]string, error)
+	ActiveChildIDs(ctx context.Context, personID string) ([]string, error)
+	DeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error)
+	TrashedDeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error)
 	LinksOf(ctx context.Context, caseID, personID string) ([]Relationship, error)
 	Get(ctx context.Context, caseID, id string) (*Person, error)
 	LogName(ctx context.Context, caseID, id string) (string, error)
 	LockActive(ctx context.Context, caseID, id string) error
-	ListPeople(ctx context.Context, caseID string, page, perPage int) ([]Person, int, error)
+	ListPeople(ctx context.Context, caseID string) ([]Person, error)
 	CreatePerson(ctx context.Context, caseID, firstName, lastName string, input UpdatePersonInput) (*Person, error)
 	UpdatePerson(ctx context.Context, caseID, personID string, input UpdatePersonInput) (*Person, error)
 	DeletePerson(ctx context.Context, caseID, personID string) error
 	LockPeople(ctx context.Context, ids ...string) error
+	BumpVersions(ctx context.Context, caseID string, ids []string) error
 	AddParent(ctx context.Context, caseID, personID, parentID string) (*Relationship, error)
 	RemoveParent(ctx context.Context, caseID, personID, parentID string) error
 	RequireActive(ctx context.Context, caseID, personID string) error
@@ -49,30 +54,21 @@ func NewStore(db *sql.DB) Store {
 	return &store{db: db}
 }
 
-func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int) ([]Person, int, error) {
-	var total int
-	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM active_people WHERE case_id = $1`, caseID,
-	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count people: %w", err)
-	}
-
-	offset := (page - 1) * perPage
+func (s *store) ListPeople(ctx context.Context, caseID string) ([]Person, error) {
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT
 			id::text, case_id::text,
 			first_name, last_name,
 			birth_date::text, birth_place,
 			death_date::text, notes,
-			created_at, updated_at,
+			version, created_at, updated_at,
 			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN active_people pa ON pa.id = pr.parent_id WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
 		FROM people
 		WHERE id IN (SELECT id FROM active_people WHERE case_id = $1)
-		ORDER BY birth_date ASC NULLS LAST, created_at ASC, id ASC
-		LIMIT $2 OFFSET $3`,
-		caseID, perPage, offset)
+		ORDER BY birth_date ASC NULLS LAST, created_at ASC, id ASC`,
+		caseID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("query people: %w", err)
+		return nil, fmt.Errorf("query people: %w", err)
 	}
 	defer rows.Close()
 
@@ -86,20 +82,20 @@ func (s *store) ListPeople(ctx context.Context, caseID string, page, perPage int
 			&p.FirstName, &p.LastName,
 			&birthDate, &birthPlace,
 			&deathDate, &notes,
-			&p.CreatedAt, &p.UpdatedAt,
+			&p.Version, &p.CreatedAt, &p.UpdatedAt,
 			&parentIDs,
 		); err != nil {
-			return nil, 0, fmt.Errorf("scan person: %w", err)
+			return nil, fmt.Errorf("scan person: %w", err)
 		}
 		assignNullable(&p, birthDate, birthPlace, deathDate, notes)
 		p.ParentIDs = toStringSlice(parentIDs)
 		items = append(items, p)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate people: %w", err)
+		return nil, fmt.Errorf("iterate people: %w", err)
 	}
 
-	return items, total, nil
+	return items, nil
 }
 
 func (s *store) CreatePerson(ctx context.Context, caseID, firstName, lastName string, input UpdatePersonInput) (*Person, error) {
@@ -132,7 +128,7 @@ func (s *store) UpdatePerson(ctx context.Context, caseID, personID string, input
 			birth_place = CASE WHEN $7 THEN $8         ELSE birth_place END,
 			death_date  = CASE WHEN $9 THEN $10::date  ELSE death_date  END,
 			notes       = CASE WHEN $11 THEN $12        ELSE notes       END,
-			updated_at  = NOW()
+			updated_at  = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		personID, caseID,
 		input.FirstName,
@@ -166,7 +162,7 @@ func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person
 			first_name, last_name,
 			birth_date::text, birth_place,
 			death_date::text, notes,
-			created_at, updated_at,
+			version, created_at, updated_at,
 			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN active_people pa ON pa.id = pr.parent_id WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
 		FROM people
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
@@ -176,7 +172,7 @@ func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person
 		&p.FirstName, &p.LastName,
 		&birthDate, &birthPlace,
 		&deathDate, &notes,
-		&p.CreatedAt, &p.UpdatedAt,
+		&p.Version, &p.CreatedAt, &p.UpdatedAt,
 		&parentIDs,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -192,7 +188,7 @@ func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person
 
 func (s *store) DeletePerson(ctx context.Context, caseID, personID string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
-		UPDATE people SET deleted_at = NOW()
+		UPDATE people SET deleted_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		personID, caseID,
 	)
@@ -365,7 +361,7 @@ func (s *store) ChildWithFullParents(ctx context.Context, caseID, personID strin
 
 func (s *store) Restore(ctx context.Context, caseID, id string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
-		`UPDATE people SET deleted_at = NULL WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		`UPDATE people SET deleted_at = NULL, version = version + 1 WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
 		id, caseID)
 	if err != nil {
 		return fmt.Errorf("restore person: %w", err)
@@ -447,4 +443,92 @@ func (s *store) LinksOf(ctx context.Context, caseID, personID string) ([]Relatio
 		links = append(links, r)
 	}
 	return links, rows.Err()
+}
+
+// ActiveParentIDs returns the person's active parents: the links a user sees.
+func (s *store) ActiveParentIDs(ctx context.Context, personID string) ([]string, error) {
+	return s.ids(ctx, `
+		SELECT pr.parent_id::text FROM person_relationships pr
+		JOIN active_people ap ON ap.id = pr.parent_id
+		WHERE pr.person_id = $1`, personID)
+}
+
+// ActiveChildIDs returns the person's active children: the links a user sees.
+func (s *store) ActiveChildIDs(ctx context.Context, personID string) ([]string, error) {
+	return s.ids(ctx, `
+		SELECT pr.person_id::text FROM person_relationships pr
+		JOIN active_people ap ON ap.id = pr.person_id
+		WHERE pr.parent_id = $1`, personID)
+}
+
+func (s *store) ids(ctx context.Context, query string, args ...any) ([]string, error) {
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query ids: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// DeletionImpact counts what is visible beneath a person and would go with
+// them: their active life events, documents, and the claim lines rooted at them.
+func (s *store) DeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error) {
+	var d DeletionImpact
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM active_life_events WHERE case_id = $1 AND person_id = $2),
+			(SELECT COUNT(*) FROM active_documents WHERE case_id = $1 AND person_id = $2),
+			(SELECT COUNT(*) FROM active_claim_lines WHERE case_id = $1 AND root_person_id = $2)`,
+		caseID, personID,
+	).Scan(&d.LifeEvents, &d.Documents, &d.ClaimLines)
+	if err != nil {
+		return nil, fmt.Errorf("deletion impact: %w", err)
+	}
+	return &d, nil
+}
+
+// TrashedDeletionImpact counts everything a permanent delete of a person in the
+// trash would remove: all their life events, documents, and the claim lines
+// rooted at them, including any moved to the trash separately. It returns
+// ErrNotFound unless the person is itself in the trash.
+func (s *store) TrashedDeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error) {
+	var d DeletionImpact
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM life_events WHERE person_id = p.id),
+			(SELECT COUNT(*) FROM documents WHERE person_id = p.id),
+			(SELECT COUNT(*) FROM claim_lines WHERE root_person_id = p.id)
+		FROM people p
+		WHERE p.id = $2 AND p.case_id = $1 AND p.deleted_at IS NOT NULL`,
+		caseID, personID,
+	).Scan(&d.LifeEvents, &d.Documents, &d.ClaimLines)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("deletion impact: %w", err)
+	}
+	return &d, nil
+}
+
+// BumpVersions records a change to each of these people, for a family link
+// added to or removed from them by an edit of someone else.
+func (s *store) BumpVersions(ctx context.Context, caseID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`UPDATE people SET updated_at = NOW(), version = version + 1 WHERE case_id = $1 AND id = ANY($2)`,
+		caseID, pq.Array(ids)); err != nil {
+		return fmt.Errorf("bump versions: %w", err)
+	}
+	return nil
 }

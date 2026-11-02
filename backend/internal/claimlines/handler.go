@@ -5,7 +5,6 @@
 package claimlines
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -27,121 +26,93 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/cases/{caseId}/claim-lines/{lineId}", h.deleteClaimLine)
 }
 
-func (h *Handler) listClaimLines(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-
-	page, perPage, ok := platform.ParsePagination(w, r)
-	if !ok {
+// respondError writes the response for an error from the service.
+func respondError(w http.ResponseWriter, r *http.Request, err error, notFound string) {
+	if platform.WriteError(w, err) {
 		return
 	}
-
-	items, total, err := h.svc.ListClaimLines(r.Context(), caseID, page, perPage)
 	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
+		platform.Error(w, http.StatusNotFound, "not_found", notFound)
 		return
 	}
-	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
-		return
-	}
+	platform.ServerError(w, r, err)
+}
 
-	platform.JSON(w, http.StatusOK, platform.ListResponse{
-		Items:   items,
-		Total:   total,
-		Page:    page,
-		PerPage: perPage,
-	})
+func (h *Handler) listClaimLines(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListClaimLines(r.Context(), r.PathValue("caseId"))
+	if err != nil {
+		respondError(w, r, err, "Case not found")
+		return
+	}
+	platform.JSON(w, http.StatusOK, platform.Items{Items: items, Total: len(items)})
 }
 
 func (h *Handler) createClaimLine(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-
 	var body struct {
 		RootPersonID string              `json:"root_person_id"`
 		Status       string              `json:"status"`
 		Notes        platform.NullString `json:"notes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
+	if err := platform.Decode(r, &body); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-	if body.RootPersonID == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "root_person_id is required")
+	var v platform.Validator
+	v.Required("root_person_id", body.RootPersonID)
+	v.ID("root_person_id", body.RootPersonID)
+	v.OneOf("status", body.Status, validStatuses)
+	if err := v.Err(); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
 	status := body.Status
 	if status == "" {
 		status = "not_yet_researched"
-	} else if !validStatuses[status] {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid status")
-		return
 	}
-
-	cl, err := h.svc.CreateClaimLine(r.Context(), caseID, body.RootPersonID, status, (body.Notes))
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
-		return
-	}
+	cl, err := h.svc.CreateClaimLine(r.Context(), r.PathValue("caseId"), body.RootPersonID, status, body.Notes)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "Person not found")
 		return
 	}
-
 	platform.JSON(w, http.StatusCreated, cl)
 }
 
 func (h *Handler) updateClaimLine(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	lineID := r.PathValue("lineId")
-
 	var body struct {
-		Status *string             `json:"status"`
-		Notes  platform.NullString `json:"notes"`
+		Version *int                `json:"version"`
+		Status  *string             `json:"status"`
+		Notes   platform.NullString `json:"notes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
+	if err := platform.Decode(r, &body); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-	if body.Status != nil && !validStatuses[*body.Status] {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid status")
+	var v platform.Validator
+	v.Version(body.Version)
+	if body.Status != nil {
+		v.OneOf("status", *body.Status, validStatuses)
+	}
+	if err := v.Err(); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-
-	cl, err := h.svc.UpdateClaimLine(r.Context(), caseID, lineID, body.Status, (body.Notes))
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Claim line not found")
-		return
-	}
+	cl, err := h.svc.UpdateClaimLine(r.Context(), r.PathValue("caseId"), r.PathValue("lineId"), *body.Version, body.Status, body.Notes)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "Claim line not found")
 		return
 	}
-
 	platform.JSON(w, http.StatusOK, cl)
 }
 
 func (h *Handler) deleteClaimLine(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	lineID := r.PathValue("lineId")
-
-	err := h.svc.DeleteClaimLine(r.Context(), caseID, lineID)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Claim line not found")
-		return
-	}
+	version, err := platform.QueryVersion(r)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "")
 		return
 	}
-
+	if err := h.svc.DeleteClaimLine(r.Context(), r.PathValue("caseId"), r.PathValue("lineId"), version); err != nil {
+		respondError(w, r, err, "Claim line not found")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

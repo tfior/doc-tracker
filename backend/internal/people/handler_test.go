@@ -34,7 +34,7 @@ func newTestEnv(t *testing.T) *testEnv {
 }
 
 func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	return e.c.Do(method, path, body)
+	return e.c.DoV(method, path, body)
 }
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
@@ -324,60 +324,56 @@ func TestDeletePerson_WrongCase(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/cases/:caseId/people/:personId/relationships
+// Parent links, set through PATCH /api/v1/cases/:caseId/people/:personId
 // ---------------------------------------------------------------------------
 
-func TestAddParent_Valid(t *testing.T) {
+// setParents sets a person's complete list of parents through the person update.
+func (e *testEnv) setParents(caseID, personID string, parentIDs ...string) *httptest.ResponseRecorder {
+	if parentIDs == nil {
+		parentIDs = []string{}
+	}
+	return e.do("PATCH", "/api/v1/cases/"+caseID+"/people/"+personID, map[string]any{"parent_ids": parentIDs})
+}
+
+func TestSetParents_Valid(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t)
 	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
 	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
 
-	rec := env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships", map[string]any{
-		"parent_id": parent.ID,
-	})
+	rec := env.setParents(c.ID, child.ID, parent.ID)
 
-	assert.Equal(t, http.StatusCreated, rec.Code)
-	var got struct {
-		PersonID string `json:"person_id"`
-		ParentID string `json:"parent_id"`
-		CaseID   string `json:"case_id"`
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var got people.Person
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
-	assert.Equal(t, child.ID, got.PersonID)
-	assert.Equal(t, parent.ID, got.ParentID)
-	assert.Equal(t, c.ID, got.CaseID)
+	assert.Equal(t, []string{parent.ID}, got.ParentIDs)
 }
 
-func TestAddParent_SelfReference(t *testing.T) {
+func TestSetParents_SelfReference(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t)
 	p := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
 
-	rec := env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+p.ID+"/relationships", map[string]any{
-		"parent_id": p.ID,
-	})
+	rec := env.setParents(c.ID, p.ID, p.ID)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestAddParent_ParentInDifferentCase(t *testing.T) {
+func TestSetParents_ParentInDifferentCase(t *testing.T) {
 	env := newTestEnv(t)
 	caseA := env.createCase(t)
 	caseB := env.createCase(t)
 	child := env.createPerson(t, caseA.ID, "Antonio", "Rossi")
 	parent := env.createPerson(t, caseB.ID, "Giuseppe", "Rossi")
 
-	rec := env.do("POST", "/api/v1/cases/"+caseA.ID+"/people/"+child.ID+"/relationships", map[string]any{
-		"parent_id": parent.ID,
-	})
+	rec := env.setParents(caseA.ID, child.ID, parent.ID)
 
 	// The API is case-scoped; a parent from a different case doesn't exist in
 	// this case's context, so the response is 404 rather than 400.
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestAddParent_ExceedsMaxParents(t *testing.T) {
+func TestSetParents_ExceedsMaxParents(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t)
 	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
@@ -385,84 +381,45 @@ func TestAddParent_ExceedsMaxParents(t *testing.T) {
 	parent2 := env.createPerson(t, c.ID, "Maria", "Ferrari")
 	parent3 := env.createPerson(t, c.ID, "Carlo", "Rossi")
 
-	addParent := func(parentID string) *httptest.ResponseRecorder {
-		return env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships", map[string]any{
-			"parent_id": parentID,
-		})
-	}
-	require.Equal(t, http.StatusCreated, addParent(parent1.ID).Code)
-	require.Equal(t, http.StatusCreated, addParent(parent2.ID).Code)
+	require.Equal(t, http.StatusOK, env.setParents(c.ID, child.ID, parent1.ID, parent2.ID).Code)
 
-	rec := addParent(parent3.ID)
+	rec := env.setParents(c.ID, child.ID, parent1.ID, parent2.ID, parent3.ID)
 	assert.Equal(t, http.StatusConflict, rec.Code)
 }
 
-func TestAddParent_Duplicate(t *testing.T) {
-	env := newTestEnv(t)
-	c := env.createCase(t)
-	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
-	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
-
-	path := "/api/v1/cases/" + c.ID + "/people/" + child.ID + "/relationships"
-	body := map[string]any{"parent_id": parent.ID}
-	require.Equal(t, http.StatusCreated, env.do("POST", path, body).Code)
-
-	rec := env.do("POST", path, body)
-	assert.Equal(t, http.StatusConflict, rec.Code)
-}
-
-func TestAddParent_PersonNotFound(t *testing.T) {
+func TestSetParents_PersonNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t)
 	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
 
-	rec := env.do("POST", "/api/v1/cases/"+c.ID+"/people/00000000-0000-0000-0000-000000000000/relationships", map[string]any{
-		"parent_id": parent.ID,
-	})
+	rec := env.setParents(c.ID, "00000000-0000-0000-0000-000000000000", parent.ID)
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestAddParent_ParentNotFound(t *testing.T) {
+func TestSetParents_ParentNotFound(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t)
 	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
 
-	rec := env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships", map[string]any{
-		"parent_id": "00000000-0000-0000-0000-000000000000",
-	})
+	rec := env.setParents(c.ID, child.ID, "00000000-0000-0000-0000-000000000000")
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-// ---------------------------------------------------------------------------
-// DELETE /api/v1/cases/:caseId/people/:personId/relationships/:parentId
-// ---------------------------------------------------------------------------
-
-func TestRemoveParent_Valid(t *testing.T) {
+func TestSetParents_RemoveParent(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.createCase(t)
 	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
 	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
+	require.Equal(t, http.StatusOK, env.setParents(c.ID, child.ID, parent.ID).Code)
 
-	addRec := env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships", map[string]any{
-		"parent_id": parent.ID,
-	})
-	require.Equal(t, http.StatusCreated, addRec.Code)
+	rec := env.setParents(c.ID, child.ID)
 
-	rec := env.do("DELETE", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships/"+parent.ID, nil)
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-}
-
-func TestRemoveParent_NotFound(t *testing.T) {
-	env := newTestEnv(t)
-	c := env.createCase(t)
-	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
-	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
-
-	// Relationship was never added.
-	rec := env.do("DELETE", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships/"+parent.ID, nil)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var got people.Person
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
+	assert.Empty(t, got.ParentIDs)
 }
 
 // ---------------------------------------------------------------------------
@@ -509,10 +466,7 @@ func TestParentIDs_ReflectedInList(t *testing.T) {
 	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
 	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
 
-	addRec := env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships", map[string]any{
-		"parent_id": parent.ID,
-	})
-	require.Equal(t, http.StatusCreated, addRec.Code)
+	require.Equal(t, http.StatusOK, env.setParents(c.ID, child.ID, parent.ID).Code)
 
 	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/people", nil)
 	var list struct {
@@ -536,10 +490,8 @@ func TestParentIDs_ClearedAfterRemoval(t *testing.T) {
 	parent := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
 	child := env.createPerson(t, c.ID, "Antonio", "Rossi")
 
-	env.do("POST", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships", map[string]any{
-		"parent_id": parent.ID,
-	})
-	env.do("DELETE", "/api/v1/cases/"+c.ID+"/people/"+child.ID+"/relationships/"+parent.ID, nil)
+	require.Equal(t, http.StatusOK, env.setParents(c.ID, child.ID, parent.ID).Code)
+	require.Equal(t, http.StatusOK, env.setParents(c.ID, child.ID).Code)
 
 	listRec := env.do("GET", "/api/v1/cases/"+c.ID+"/people", nil)
 	var list struct {

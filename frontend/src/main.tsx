@@ -9,8 +9,19 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MantineProvider, createTheme } from '@mantine/core';
 import '@mantine/core/styles.css';
 import App from './App';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ApiError } from './api/client';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // A refusal from the server, such as not found, will not change on a
+      // second try. Only network failures and server errors are retried.
+      retry: (failureCount, error) =>
+        !(error instanceof ApiError && error.status >= 400 && error.status < 500) && failureCount < 3,
+    },
+  },
+});
 const theme = createTheme({});
 
 createRoot(document.getElementById('root')!).render(
@@ -18,7 +29,9 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <QueryClientProvider client={queryClient}>
         <MantineProvider theme={theme}>
-          <App />
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
         </MantineProvider>
       </QueryClientProvider>
     </BrowserRouter>

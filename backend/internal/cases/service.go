@@ -50,7 +50,7 @@ func (s *Service) CreateCase(ctx context.Context, title string) (*Case, error) {
 	return c, err
 }
 
-func (s *Service) UpdateCase(ctx context.Context, caseID string, title *string, status *string) (*Case, error) {
+func (s *Service) UpdateCase(ctx context.Context, caseID string, version int, title *string, status *string) (*Case, error) {
 	var c *Case
 	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
 		if err := s.store.LockActive(ctx, caseID); err != nil {
@@ -58,6 +58,9 @@ func (s *Service) UpdateCase(ctx context.Context, caseID string, title *string, 
 		}
 		before, err := s.store.Get(ctx, caseID)
 		if err != nil {
+			return err
+		}
+		if err := platform.CheckVersion(before.Version, version); err != nil {
 			return err
 		}
 		if c, err = s.store.UpdateCase(ctx, caseID, title, status); err != nil {
@@ -68,9 +71,16 @@ func (s *Service) UpdateCase(ctx context.Context, caseID string, title *string, 
 	return c, err
 }
 
-func (s *Service) DeleteCase(ctx context.Context, caseID string) error {
+func (s *Service) DeleteCase(ctx context.Context, caseID string, version int) error {
 	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
 		if err := s.store.LockActive(ctx, caseID); err != nil {
+			return err
+		}
+		before, err := s.store.Get(ctx, caseID)
+		if err != nil {
+			return err
+		}
+		if err := platform.CheckVersion(before.Version, version); err != nil {
 			return err
 		}
 		if err := s.store.DeleteCase(ctx, caseID); err != nil {

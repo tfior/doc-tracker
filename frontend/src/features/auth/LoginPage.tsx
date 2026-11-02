@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, type Location } from 'react-router-dom';
 import {
   Center,
   Paper,
@@ -15,11 +15,13 @@ import {
   Stack,
 } from '@mantine/core';
 import { useAuth } from './authContext';
-import { ApiError } from '../../api/client';
+import { errorMessage } from '../../lib/errors';
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  // Where the user was heading when they were sent here, if anywhere.
+  const from = (useLocation().state as { from?: Location } | null)?.from;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,13 +34,9 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      navigate('/cases', { replace: true });
+      navigate(from ? `${from.pathname}${from.search}${from.hash}` : '/cases', { replace: true });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        setError('Invalid email or password.');
-      } else {
-        setError('Something went wrong. Please try again.');
-      }
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }

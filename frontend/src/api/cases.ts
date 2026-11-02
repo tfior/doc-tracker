@@ -2,13 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { get, post, patch, del } from './client';
+import { get, post, patch, del, type Items } from './client';
 
 export interface Case {
   id: string;
   title: string;
   status: string;
   primary_root_person_id: string | null;
+  version: number;
   created_at: string;
   updated_at: string;
 }
@@ -26,15 +27,24 @@ export interface CaseDetail extends Case {
   claim_line_summary: ClaimLineSummary;
 }
 
-export interface ListResponse<T> {
-  items: T[];
-  total: number;
+interface CasePage extends Items<Case> {
   page: number;
   per_page: number;
 }
 
-export function listCases(): Promise<ListResponse<Case>> {
-  return get<ListResponse<Case>>('/cases');
+// The largest page the server allows.
+const PER_PAGE = 200;
+
+/** Fetches every case, one page after another. */
+export async function listCases(): Promise<Items<Case>> {
+  const items: Case[] = [];
+  for (let page = 1; ; page++) {
+    const res = await get<CasePage>('/cases', { page, per_page: PER_PAGE });
+    items.push(...res.items);
+    if (res.items.length === 0 || items.length >= res.total) {
+      return { items, total: res.total };
+    }
+  }
 }
 
 export function getCase(caseId: string): Promise<CaseDetail> {
@@ -45,10 +55,10 @@ export function createCase(title: string): Promise<Case> {
   return post<Case>('/cases', { title });
 }
 
-export function updateCase(caseId: string, input: { title?: string; status?: string }): Promise<Case> {
-  return patch<Case>(`/cases/${caseId}`, input);
+export function updateCase(caseId: string, version: number, input: { title?: string; status?: string }): Promise<Case> {
+  return patch<Case>(`/cases/${caseId}`, { version, ...input });
 }
 
-export function deleteCase(caseId: string): Promise<void> {
-  return del(`/cases/${caseId}`);
+export function deleteCase(caseId: string, version: number): Promise<void> {
+  return del(`/cases/${caseId}`, { version });
 }

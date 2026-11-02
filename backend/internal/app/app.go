@@ -64,5 +64,5 @@ func NewHandler(db *sql.DB) http.Handler {
 		r.RegisterRoutes(mux)
 	}
 
-	return auth.Middleware(authSvc)(mux)
+	return auth.Middleware(authSvc)(platform.ValidIDs(mux))
 }

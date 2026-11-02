@@ -7,6 +7,7 @@ package platform
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 )
 
@@ -43,9 +44,18 @@ func Conflict(format string, args ...any) error {
 	return &ConflictError{Message: fmt.Sprintf(format, args...)}
 }
 
-// InvalidError is invalid input with a message written for the user.
+// FieldError is one field at fault in an invalid request.
+type FieldError struct {
+	Field   string `json:"field"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// InvalidError is invalid input with a message written for the user, and the
+// fields at fault when the problem can be tied to them.
 type InvalidError struct {
 	Message string
+	Fields  []FieldError
 }
 
 func (e *InvalidError) Error() string { return e.Message }
@@ -55,10 +65,35 @@ func Invalid(format string, args ...any) error {
 	return &InvalidError{Message: fmt.Sprintf(format, args...)}
 }
 
-// WriteError writes the response for errors that carry a user-facing message
-// (ConflictError, InvalidError) and reports whether it did. Handlers call it
-// before their own error mapping.
+// InvalidField returns an InvalidError for a single field.
+func InvalidField(field, code, message string) error {
+	return &InvalidError{Message: message, Fields: []FieldError{{Field: field, Code: code, Message: message}}}
+}
+
+// ErrVersionConflict means the record changed since the client read it.
+var ErrVersionConflict = errors.New("version conflict")
+
+// VersionConflict returns the error for a write based on an out-of-date version.
+func VersionConflict() error { return ErrVersionConflict }
+
+// CheckVersion returns ErrVersionConflict unless the client's version is the
+// record's current one.
+func CheckVersion(current, sent int) error {
+	if current != sent {
+		return ErrVersionConflict
+	}
+	return nil
+}
+
+// WriteError writes the response for errors that carry their own meaning for
+// the user (version conflicts, conflicts, invalid input) and reports whether
+// it did. Handlers call it before their own error mapping.
 func WriteError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, ErrVersionConflict) {
+		Error(w, http.StatusConflict, "version_conflict",
+			"This record was changed by someone else since you opened it. Reload it and make your change again.")
+		return true
+	}
 	var ce *ConflictError
 	if errors.As(err, &ce) {
 		Error(w, http.StatusConflict, "conflict", ce.Message)
@@ -66,8 +101,19 @@ func WriteError(w http.ResponseWriter, err error) bool {
 	}
 	var ie *InvalidError
 	if errors.As(err, &ie) {
-		Error(w, http.StatusBadRequest, "invalid_input", ie.Message)
+		body := map[string]any{"code": "invalid_input", "message": ie.Message}
+		if len(ie.Fields) > 0 {
+			body["fields"] = ie.Fields
+		}
+		JSON(w, http.StatusBadRequest, map[string]any{"error": body})
 		return true
 	}
 	return false
+}
+
+// ServerError logs an unexpected error with its cause and writes a 500. The
+// cause is never sent to the client.
+func ServerError(w http.ResponseWriter, r *http.Request, err error) {
+	slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+	Error(w, http.StatusInternalServerError, "internal", "Something went wrong on the server. Please try again.")
 }

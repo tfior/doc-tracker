@@ -21,6 +21,7 @@ type Person struct {
 	DeathDate  *string   `json:"death_date"`
 	Notes      *string   `json:"notes"`
 	ParentIDs  []string  `json:"parent_ids"`
+	Version    int       `json:"version"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -32,12 +33,24 @@ type Relationship struct {
 }
 
 type UpdatePersonInput struct {
+	Version    int // the version the change is based on; unused on create
 	FirstName  *string
 	LastName   *string
 	BirthDate  platform.NullString
 	BirthPlace platform.NullString
 	DeathDate  platform.NullString
 	Notes      platform.NullString
+	// ParentIDs and ChildIDs, when supplied, are the person's complete lists of
+	// active parents and children; links not listed are removed.
+	ParentIDs *[]string
+	ChildIDs  *[]string
+}
+
+// DeletionImpact is what deleting a person would take with them.
+type DeletionImpact struct {
+	LifeEvents int `json:"life_events"`
+	Documents  int `json:"documents"`
+	ClaimLines int `json:"claim_lines"`
 }
 
 // logFields is what the activity log compares when a person changes.

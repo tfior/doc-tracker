@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { get, post, patch, del, type ListResponse } from './client';
+import { get, post, patch, del, type Items } from './client';
 
 export interface ClaimLine {
   id: string;
@@ -10,12 +10,13 @@ export interface ClaimLine {
   root_person_id: string;
   status: string;
   notes: string | null;
+  version: number;
   created_at: string;
   updated_at: string;
 }
 
-export function listClaimLines(caseId: string): Promise<ListResponse<ClaimLine>> {
-  return get<ListResponse<ClaimLine>>(`/cases/${caseId}/claim-lines`);
+export function listClaimLines(caseId: string): Promise<Items<ClaimLine>> {
+  return get<Items<ClaimLine>>(`/cases/${caseId}/claim-lines`);
 }
 
 export function createClaimLine(
@@ -28,11 +29,12 @@ export function createClaimLine(
 export function updateClaimLine(
   caseId: string,
   lineId: string,
+  version: number,
   input: { status?: string; notes?: string | null },
 ): Promise<ClaimLine> {
-  return patch<ClaimLine>(`/cases/${caseId}/claim-lines/${lineId}`, input);
+  return patch<ClaimLine>(`/cases/${caseId}/claim-lines/${lineId}`, { version, ...input });
 }
 
-export function deleteClaimLine(caseId: string, lineId: string): Promise<void> {
-  return del(`/cases/${caseId}/claim-lines/${lineId}`);
+export function deleteClaimLine(caseId: string, lineId: string, version: number): Promise<void> {
+  return del(`/cases/${caseId}/claim-lines/${lineId}`, { version });
 }

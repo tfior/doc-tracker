@@ -177,29 +177,29 @@ Activity log
 - [x] Tests assert on activity log rows
 
 API
-- [ ] `version` on Case, Person, LifeEvent, Document, ClaimLine; a stale write is refused with `conflict`
-- [ ] One `PATCH` per entity accepting everything its form can change; remove the status, parent, person, and relationship endpoints
-- [ ] Lists inside a case are returned in full
-- [ ] Error responses carry field-level errors with codes; every invalid field is reported at once
-- [ ] Malformed IDs and invalid values return `invalid_input`, not a server error
-- [ ] Unknown request fields are rejected; names are trimmed and must not be blank
-- [ ] Every server error is logged with its cause
-- [ ] Deleting a person or life event reports what goes with it, for the confirmation dialog
+- [x] `version` on Case, Person, LifeEvent, Document, ClaimLine; a stale write is refused with `version_conflict`
+- [x] One `PATCH` per entity accepting everything its form can change; remove the status, parent, person, and relationship endpoints
+- [x] Lists inside a case are returned in full
+- [x] Error responses carry field-level errors with codes; every invalid field is reported at once
+- [x] Malformed IDs and invalid values return `invalid_input`, not a server error
+- [x] Unknown request fields are rejected; names are trimmed and must not be blank
+- [x] Every server error is logged with its cause
+- [x] Deleting a person or life event reports what goes with it, for the confirmation dialog
 - [x] Handler tests run behind the auth middleware
 
 ### Frontend
 
-- [ ] Each form's Save sends one request, including the record's version
-- [ ] Field errors are shown beside their fields; a server message is never replaced by a generic one
-- [ ] A conflict tells the user the record changed and offers to reload it
-- [ ] An expired session on any request sends the user to the login screen
-- [ ] Every action reports failure, including the inline status dropdowns and all delete buttons
-- [ ] Delete confirmations state what will go with the item
-- [ ] Pages touched are split into one component file per form, modal, and section
+- [x] Each form's Save sends one request, including the record's version
+- [x] Field errors are shown beside their fields; a server message is never replaced by a generic one
+- [x] A conflict tells the user the record changed and offers to reload it
+- [x] An expired session on any request sends the user to the login screen
+- [x] Every action reports failure, including the inline status dropdowns and all delete buttons
+- [x] Delete confirmations state what will go with the item
+- [x] Pages touched are split into one component file per form, modal, and section
 
 ### Infrastructure
 
-- [ ] `make schema` generates `db/schema.sql` from a freshly migrated database; CI fails if the committed file is stale
+- [x] `make schema` generates `db/schema.sql` from a freshly migrated database; CI fails if the committed file is stale
 - [x] CI runs `gofmt`, `go vet`, and `govulncheck`
 
 ---
@@ -228,11 +228,11 @@ API
 
 ### Frontend
 
-- [ ] A shared date input in `components/`: qualifier plus one or two partial dates
+- [ ] A shared date input in `components/`: a qualifier and separate year, month and day fields, with month and day optional and impossible days not offered
 - [ ] The person form edits birth and death through their life events
 - [ ] The marriage form can link the spouse to a person in the case, and has a "Marriage ended in divorce" section
 - [ ] Wording: "Root Ancestor", "Registration date", and the "As recorded in document" heading
-- [ ] Qualified dates are displayed in words, such as "about 1890"
+- [ ] Every date is displayed in words, day first: "4 March 1890", "March 1890", "about 1890"
 
 ---
 
@@ -381,13 +381,13 @@ Minor issues found in the October 2026 review. Each is cleared when its file is 
 - [x] A document cannot be restored from the trash while its person or life event is still in it (3)
 - [x] Two simultaneous requests cannot give a person a third parent (3)
 - [x] Lists for a case that does not exist return not found, not an empty list (3)
-- [ ] Failed requests are not retried when the answer is definite, such as not found (3)
-- [ ] Logging out clears cached data, so the next user on the same browser never sees it (3)
-- [ ] An unknown URL shows a "page not found" screen
-- [ ] After logging in, the user lands on the page they were heading for
-- [ ] A crash in one component shows an error message, not a blank screen
+- [x] Failed requests are not retried when the answer is definite, such as not found (3)
+- [x] Logging out clears cached data, so the next user on the same browser never sees it (3)
+- [x] An unknown URL shows a "page not found" screen
+- [x] After logging in, the user lands on the page they were heading for
+- [x] A crash in one component shows an error message, not a blank screen
 - [x] Lists have a stable order when dates are equal or missing
 - [ ] Spouse details cannot be saved on events that are not marriages (4)
-- [ ] The overview's list of life events without documents names each event's person (5)
+- [x] The overview's list of life events without documents names each event's person (5)
 - [ ] Login takes the same time for an unknown email as for a wrong password (7)
 - [ ] Creating a user asks for the password twice and enforces a minimum length (7)

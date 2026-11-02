@@ -12,9 +12,11 @@ import (
 )
 
 type UpdateDocumentInput struct {
+	Version            int     // the version the change is based on; unused on create
+	PersonID           *string // update only; on create the person is a separate argument
+	LifeEventID        platform.NullString
 	Title              *string
 	DocumentType       *string
-	LifeEventID        platform.NullString // used on create only; ignored by update handler
 	IssuingAuthority   platform.NullString
 	IssueDate          platform.NullString
 	RecordedDate       platform.NullString
@@ -24,16 +26,12 @@ type UpdateDocumentInput struct {
 	RecordedBirthPlace platform.NullString
 	Notes              platform.NullString
 	IsVerified         *bool
-}
 
-type ReassignDocumentInput struct {
-	PersonID    string
-	LifeEventID platform.NullString
-}
-
-type TransitionStatusInput struct {
-	Phase    string
-	StatusID string
+	// Phase statuses, update only. Each must belong to its phase or to "any".
+	OfficialCopyStatusID *string
+	AmendmentStatusID    *string
+	ApostilleStatusID    *string
+	TranslationStatusID  *string
 }
 
 // PhaseStatus is the resolved status for a single document phase,
@@ -75,6 +73,7 @@ type Document struct {
 	AmendmentStatus    PhaseStatus `json:"amendment_status"`
 	ApostilleStatus    PhaseStatus `json:"apostille_status"`
 	TranslationStatus  PhaseStatus `json:"translation_status"`
+	Version            int         `json:"version"`
 	CreatedAt          time.Time   `json:"created_at"`
 	UpdatedAt          time.Time   `json:"updated_at"`
 }

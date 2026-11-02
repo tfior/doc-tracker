@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tfior/doc-tracker/internal/app"
@@ -101,10 +103,75 @@ func (c *AppClient) MustCreateInto(t *testing.T, path string, body, out any) {
 	}
 }
 
-// MustDelete sends a DELETE that must return 204.
+// MustDelete sends a DELETE, with the record's current version, that must return 204.
 func (c *AppClient) MustDelete(t *testing.T, path string) {
 	t.Helper()
-	if rec := c.Do("DELETE", path, nil); rec.Code != http.StatusNoContent {
+	if rec := c.DoV("DELETE", path, nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("setup: DELETE %s: status %d: %s", path, rec.Code, rec.Body.String())
 	}
+}
+
+// DoV sends a request like Do, but for a PATCH or DELETE of a case or a record
+// in a case it first looks up the record's current version and sends it: in
+// the body of a PATCH, as ?version= on a DELETE. It is for tests whose subject
+// is not versioning. A record that cannot be found is sent with version 1, so
+// the request still reaches the server and gets its real answer (not found).
+func (c *AppClient) DoV(method, path string, body any) *httptest.ResponseRecorder {
+	if method != "PATCH" && method != "DELETE" {
+		return c.Do(method, path, body)
+	}
+	version := c.currentVersion(path)
+	if method == "DELETE" {
+		sep := "?"
+		if strings.Contains(path, "?") {
+			sep = "&"
+		}
+		return c.Do(method, path+sep+"version="+strconv.Itoa(version), nil)
+	}
+	fields := map[string]any{}
+	if body != nil {
+		raw, _ := json.Marshal(body)
+		_ = json.Unmarshal(raw, &fields)
+	}
+	if _, ok := fields["version"]; !ok {
+		fields["version"] = version
+	}
+	return c.Do(method, path, fields)
+}
+
+// currentVersion finds the version of the record a path names, or 1.
+func (c *AppClient) currentVersion(path string) int {
+	parts := strings.Split(strings.TrimPrefix(path, "/api/v1/cases/"), "/")
+	var get, id string
+	switch len(parts) {
+	case 1: // /api/v1/cases/{id}
+		get, id = "/api/v1/cases/"+parts[0], parts[0]
+	case 3: // /api/v1/cases/{case}/{collection}/{id}
+		get, id = "/api/v1/cases/"+parts[0]+"/"+parts[1], parts[2]
+	default:
+		return 1
+	}
+	rec := c.Do("GET", get, nil)
+	if rec.Code != http.StatusOK {
+		return 1
+	}
+	var out struct {
+		ID      string           `json:"id"`
+		Version int              `json:"version"`
+		Items   []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		return 1
+	}
+	if out.ID == id && out.Version > 0 {
+		return out.Version
+	}
+	for _, item := range out.Items {
+		if item["id"] == id {
+			if v, ok := item["version"].(float64); ok {
+				return int(v)
+			}
+		}
+	}
+	return 1
 }

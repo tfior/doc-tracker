@@ -38,7 +38,7 @@ func newTestEnv(t *testing.T) *testEnv {
 }
 
 func (e *testEnv) do(method, path string, body any) *httptest.ResponseRecorder {
-	return e.c.Do(method, path, body)
+	return e.c.DoV(method, path, body)
 }
 
 func (e *testEnv) createCase(t *testing.T) *cases.Case {
@@ -485,45 +485,8 @@ func TestListDocumentStatuses_InvalidPhase(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// PATCH /api/v1/cases/:caseId/documents/:docId/status
+// Phase statuses, set through PATCH /api/v1/cases/:caseId/documents/:docId
 // ---------------------------------------------------------------------------
-
-func TestTransitionStatus_MissingPhase(t *testing.T) {
-	env := newTestEnv(t)
-	c := env.createCase(t)
-	p := env.createPerson(t, c.ID)
-	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
-
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"status_id": d.OfficialCopyStatus.ID,
-	})
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestTransitionStatus_MissingStatusID(t *testing.T) {
-	env := newTestEnv(t)
-	c := env.createCase(t)
-	p := env.createPerson(t, c.ID)
-	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
-
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"phase": "official_copy",
-	})
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestTransitionStatus_InvalidPhase(t *testing.T) {
-	env := newTestEnv(t)
-	c := env.createCase(t)
-	p := env.createPerson(t, c.ID)
-	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
-
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"phase":     "signature",
-		"status_id": d.OfficialCopyStatus.ID,
-	})
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
 
 func TestTransitionStatus_NonExistentStatusID(t *testing.T) {
 	env := newTestEnv(t)
@@ -531,10 +494,7 @@ func TestTransitionStatus_NonExistentStatusID(t *testing.T) {
 	p := env.createPerson(t, c.ID)
 	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"phase":     "official_copy",
-		"status_id": "00000000-0000-0000-0000-000000000000",
-	})
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, map[string]any{"official_copy_status_id": "00000000-0000-0000-0000-000000000000"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -547,10 +507,7 @@ func TestTransitionStatus_SoftDeleted(t *testing.T) {
 	env.do("DELETE", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, nil)
 
 	// Use the document's own status ID so the 404 is due to soft-delete, not invalid input.
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"phase":     "official_copy",
-		"status_id": d.OfficialCopyStatus.ID,
-	})
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, map[string]any{"official_copy_status_id": d.OfficialCopyStatus.ID})
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assertNotFoundBody(t, rec)
 }
@@ -562,10 +519,7 @@ func TestTransitionStatus_WrongCase(t *testing.T) {
 	p := env.createPerson(t, caseA.ID)
 	d := env.createDocument(t, caseA.ID, p.ID, "birth_certificate", "Some Doc")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+caseB.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"phase":     "official_copy",
-		"status_id": d.OfficialCopyStatus.ID,
-	})
+	rec := env.do("PATCH", "/api/v1/cases/"+caseB.ID+"/documents/"+d.ID, map[string]any{"official_copy_status_id": d.OfficialCopyStatus.ID})
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -584,15 +538,12 @@ func TestTransitionStatus_CrossPhase(t *testing.T) {
 	).Scan(&wrongStatusID)
 	require.NoError(t, err, "expected at least one non-any, non-official_copy status in DB")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/status", map[string]any{
-		"phase":     "official_copy",
-		"status_id": wrongStatusID,
-	})
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, map[string]any{"official_copy_status_id": wrongStatusID})
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // ---------------------------------------------------------------------------
-// PATCH /api/v1/cases/:caseId/documents/:docId/parent
+// Reassignment, through PATCH /api/v1/cases/:caseId/documents/:docId
 // ---------------------------------------------------------------------------
 
 func TestReassignDocument_ToPerson(t *testing.T) {
@@ -602,7 +553,7 @@ func TestReassignDocument_ToPerson(t *testing.T) {
 	p2 := env.createPerson(t, c.ID)
 	d := env.createDocument(t, c.ID, p1.ID, "birth_certificate", "Some Doc")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/parent", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, map[string]any{
 		"person_id": p2.ID,
 	})
 
@@ -619,7 +570,7 @@ func TestReassignDocument_ToLifeEvent(t *testing.T) {
 	le := env.createLifeEvent(t, c.ID, p.ID)
 	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/parent", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, map[string]any{
 		"person_id":     p.ID,
 		"life_event_id": le.ID,
 	})
@@ -647,7 +598,7 @@ func TestReassignDocument_ClearLifeEvent(t *testing.T) {
 	var d documents.Document
 	require.NoError(t, json.NewDecoder(createRec.Body).Decode(&d))
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID+"/parent", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, map[string]any{
 		"person_id":     p.ID,
 		"life_event_id": nil,
 	})
@@ -666,7 +617,7 @@ func TestReassignDocument_PersonNotInCase(t *testing.T) {
 	pB := env.createPerson(t, caseB.ID)
 	d := env.createDocument(t, caseA.ID, pA.ID, "birth_certificate", "Some Doc")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+caseA.ID+"/documents/"+d.ID+"/parent", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+caseA.ID+"/documents/"+d.ID, map[string]any{
 		"person_id": pB.ID,
 	})
 
@@ -682,7 +633,7 @@ func TestReassignDocument_LifeEventNotInCase(t *testing.T) {
 	leInB := env.createLifeEvent(t, caseB.ID, pB.ID)
 	d := env.createDocument(t, caseA.ID, pA.ID, "birth_certificate", "Some Doc")
 
-	rec := env.do("PATCH", "/api/v1/cases/"+caseA.ID+"/documents/"+d.ID+"/parent", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+caseA.ID+"/documents/"+d.ID, map[string]any{
 		"person_id":     pA.ID,
 		"life_event_id": leInB.ID,
 	})
@@ -695,7 +646,7 @@ func TestReassignDocument_NotFound(t *testing.T) {
 	c := env.createCase(t)
 	p := env.createPerson(t, c.ID)
 
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/00000000-0000-0000-0000-000000000000/parent", map[string]any{
+	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/00000000-0000-0000-0000-000000000000", map[string]any{
 		"person_id": p.ID,
 	})
 

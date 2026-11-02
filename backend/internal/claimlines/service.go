@@ -36,11 +36,11 @@ func NewService(store Store, db *sql.DB, log *activitylog.Service, cases CaseChe
 	return &Service{store: store, db: db, log: log, rec: log.For("claim_line", store.LogName), cases: cases, people: people}
 }
 
-func (s *Service) ListClaimLines(ctx context.Context, caseID string, page, perPage int) ([]ClaimLine, int, error) {
+func (s *Service) ListClaimLines(ctx context.Context, caseID string) ([]ClaimLine, error) {
 	if err := s.cases.RequireActive(ctx, caseID); err != nil {
-		return nil, 0, platform.MapNotFound(err, ErrNotFound)
+		return nil, platform.MapNotFound(err, ErrNotFound)
 	}
-	return s.store.ListClaimLines(ctx, caseID, page, perPage)
+	return s.store.ListClaimLines(ctx, caseID)
 }
 
 func (s *Service) CreateClaimLine(ctx context.Context, caseID, rootPersonID, status string, notes platform.NullString) (*ClaimLine, error) {
@@ -58,7 +58,7 @@ func (s *Service) CreateClaimLine(ctx context.Context, caseID, rootPersonID, sta
 	return cl, err
 }
 
-func (s *Service) UpdateClaimLine(ctx context.Context, caseID, lineID string, status *string, notes platform.NullString) (*ClaimLine, error) {
+func (s *Service) UpdateClaimLine(ctx context.Context, caseID, lineID string, version int, status *string, notes platform.NullString) (*ClaimLine, error) {
 	var cl *ClaimLine
 	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
 		if err := s.store.LockActive(ctx, caseID, lineID); err != nil {
@@ -66,6 +66,9 @@ func (s *Service) UpdateClaimLine(ctx context.Context, caseID, lineID string, st
 		}
 		before, err := s.store.Get(ctx, caseID, lineID)
 		if err != nil {
+			return err
+		}
+		if err := platform.CheckVersion(before.Version, version); err != nil {
 			return err
 		}
 		if cl, err = s.store.UpdateClaimLine(ctx, caseID, lineID, status, notes); err != nil {
@@ -76,9 +79,16 @@ func (s *Service) UpdateClaimLine(ctx context.Context, caseID, lineID string, st
 	return cl, err
 }
 
-func (s *Service) DeleteClaimLine(ctx context.Context, caseID, lineID string) error {
+func (s *Service) DeleteClaimLine(ctx context.Context, caseID, lineID string, version int) error {
 	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
 		if err := s.store.LockActive(ctx, caseID, lineID); err != nil {
+			return err
+		}
+		before, err := s.store.Get(ctx, caseID, lineID)
+		if err != nil {
+			return err
+		}
+		if err := platform.CheckVersion(before.Version, version); err != nil {
 			return err
 		}
 		if err := s.store.DeleteClaimLine(ctx, caseID, lineID); err != nil {

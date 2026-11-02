@@ -28,7 +28,7 @@ type Store interface {
 	Get(ctx context.Context, caseID, id string) (*ClaimLine, error)
 	LogName(ctx context.Context, caseID, id string) (string, error)
 	LockActive(ctx context.Context, caseID, id string) error
-	ListClaimLines(ctx context.Context, caseID string, page, perPage int) ([]ClaimLine, int, error)
+	ListClaimLines(ctx context.Context, caseID string) ([]ClaimLine, error)
 	CreateClaimLine(ctx context.Context, caseID, rootPersonID, status string, notes platform.NullString) (*ClaimLine, error)
 	UpdateClaimLine(ctx context.Context, caseID, lineID string, status *string, notes platform.NullString) (*ClaimLine, error)
 	DeleteClaimLine(ctx context.Context, caseID, lineID string) error
@@ -46,24 +46,15 @@ func NewStore(db *sql.DB) Store {
 	return &store{db: db}
 }
 
-func (s *store) ListClaimLines(ctx context.Context, caseID string, page, perPage int) ([]ClaimLine, int, error) {
-	var total int
-	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM active_claim_lines WHERE case_id = $1`, caseID,
-	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count claim lines: %w", err)
-	}
-
-	offset := (page - 1) * perPage
+func (s *store) ListClaimLines(ctx context.Context, caseID string) ([]ClaimLine, error) {
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
-		SELECT id::text, case_id::text, root_person_id::text, status::text, notes, created_at, updated_at
+		SELECT id::text, case_id::text, root_person_id::text, status::text, notes, version, created_at, updated_at
 		FROM claim_lines
 		WHERE id IN (SELECT id FROM active_claim_lines WHERE case_id = $1)
-		ORDER BY created_at ASC, id ASC
-		LIMIT $2 OFFSET $3`,
-		caseID, perPage, offset)
+		ORDER BY created_at ASC, id ASC`,
+		caseID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("query claim lines: %w", err)
+		return nil, fmt.Errorf("query claim lines: %w", err)
 	}
 	defer rows.Close()
 
@@ -71,15 +62,15 @@ func (s *store) ListClaimLines(ctx context.Context, caseID string, page, perPage
 	for rows.Next() {
 		cl, err := scanClaimLine(rows.Scan)
 		if err != nil {
-			return nil, 0, fmt.Errorf("scan claim line: %w", err)
+			return nil, fmt.Errorf("scan claim line: %w", err)
 		}
 		items = append(items, *cl)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate claim lines: %w", err)
+		return nil, fmt.Errorf("iterate claim lines: %w", err)
 	}
 
-	return items, total, nil
+	return items, nil
 }
 
 func (s *store) CreateClaimLine(ctx context.Context, caseID, rootPersonID, status string, notes platform.NullString) (*ClaimLine, error) {
@@ -103,7 +94,7 @@ func (s *store) UpdateClaimLine(ctx context.Context, caseID, lineID string, stat
 		UPDATE claim_lines SET
 			status     = COALESCE($3::claim_line_status, status),
 			notes      = CASE WHEN $4 THEN $5 ELSE notes END,
-			updated_at = NOW()
+			updated_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		lineID, caseID,
 		status,
@@ -125,7 +116,7 @@ func (s *store) UpdateClaimLine(ctx context.Context, caseID, lineID string, stat
 
 func (s *store) DeleteClaimLine(ctx context.Context, caseID, lineID string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
-		UPDATE claim_lines SET deleted_at = NOW()
+		UPDATE claim_lines SET deleted_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		lineID, caseID,
 	)
@@ -144,7 +135,7 @@ func (s *store) DeleteClaimLine(ctx context.Context, caseID, lineID string) erro
 
 func (s *store) getClaimLine(ctx context.Context, caseID, lineID string) (*ClaimLine, error) {
 	row := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
-		SELECT id::text, case_id::text, root_person_id::text, status::text, notes, created_at, updated_at
+		SELECT id::text, case_id::text, root_person_id::text, status::text, notes, version, created_at, updated_at
 		FROM claim_lines
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		lineID, caseID,
@@ -164,7 +155,7 @@ func scanClaimLine(scan func(...any) error) (*ClaimLine, error) {
 	var notes sql.NullString
 	if err := scan(
 		&cl.ID, &cl.CaseID, &cl.RootPersonID, &cl.Status, &notes,
-		&cl.CreatedAt, &cl.UpdatedAt,
+		&cl.Version, &cl.CreatedAt, &cl.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -180,7 +171,7 @@ func nullToSQL(f platform.NullString) sql.NullString {
 
 func (s *store) Restore(ctx context.Context, caseID, id string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
-		`UPDATE claim_lines SET deleted_at = NULL WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		`UPDATE claim_lines SET deleted_at = NULL, version = version + 1 WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
 		id, caseID)
 	if err != nil {
 		return fmt.Errorf("restore claim line: %w", err)

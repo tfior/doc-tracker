@@ -67,7 +67,7 @@ func TestLog_UpdateRecordsOnlyFieldsThatChanged(t *testing.T) {
 	c := e.createCase(t)
 	p := e.createPerson(t, c, "Giuseppe")
 
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+c+"/people/"+p,
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+c+"/people/"+p,
 		map[string]any{"first_name": "Joseph", "last_name": "Rossi"}) // last name unchanged
 	require.Equal(t, http.StatusOK, rec.Code)
 
@@ -83,11 +83,11 @@ func TestLog_SettingAndClearingRecordNull(t *testing.T) {
 	p := e.createPerson(t, c, "Giuseppe")
 	path := "/api/v1/cases/" + c + "/people/" + p
 
-	require.Equal(t, http.StatusOK, e.c.Do("PATCH", path, map[string]any{"notes": "Emigrated 1905"}).Code)
+	require.Equal(t, http.StatusOK, e.c.DoV("PATCH", path, map[string]any{"notes": "Emigrated 1905"}).Code)
 	assert.Equal(t, []testhelpers.Change{{Field: "notes", From: nil, To: "Emigrated 1905"}},
 		e.lastEntry(t, c, "person", p).Changes)
 
-	require.Equal(t, http.StatusOK, e.c.Do("PATCH", path, map[string]any{"notes": nil}).Code)
+	require.Equal(t, http.StatusOK, e.c.DoV("PATCH", path, map[string]any{"notes": nil}).Code)
 	assert.Equal(t, []testhelpers.Change{{Field: "notes", From: "Emigrated 1905", To: nil}},
 		e.lastEntry(t, c, "person", p).Changes)
 }
@@ -99,7 +99,7 @@ func TestLog_SaveThatChangesNothingWritesNothing(t *testing.T) {
 	p := e.createPerson(t, c, "Giuseppe")
 	before := e.entryCount(t, c)
 
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+c+"/people/"+p,
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+c+"/people/"+p,
 		map[string]any{"first_name": "Giuseppe", "last_name": "Rossi", "notes": nil})
 	require.Equal(t, http.StatusOK, rec.Code)
 
@@ -113,8 +113,8 @@ func TestLog_StatusChangeRecordsLabels(t *testing.T) {
 	p := e.createPerson(t, c, "Giuseppe")
 	doc := e.createDocument(t, c, p, "")
 
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+c+"/documents/"+doc+"/status",
-		map[string]any{"phase": "official_copy", "status_id": e.statusID(t, "official_copy", "Requested")})
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+c+"/documents/"+doc,
+		map[string]any{"official_copy_status_id": e.statusID(t, "official_copy", "Requested")})
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	assert.Equal(t, []testhelpers.Change{{Field: "official_copy_status", From: "Not Started", To: "Requested"}},
@@ -129,7 +129,7 @@ func TestLog_ReassignRecordsPersonAndEvent(t *testing.T) {
 	evA, evB := e.createLifeEvent(t, c, a), e.createLifeEvent(t, c, b)
 	doc := e.createDocument(t, c, a, evA)
 
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+c+"/documents/"+doc+"/parent",
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+c+"/documents/"+doc,
 		map[string]any{"person_id": b, "life_event_id": evB})
 	require.Equal(t, http.StatusOK, rec.Code)
 
@@ -160,7 +160,7 @@ func TestLog_EveryEntryHasReadableName(t *testing.T) {
 	e.trash(t, "/api/v1/cases/"+c+"/claim-lines/"+line)
 	e.trash(t, "/api/v1/cases/"+c+"/documents/"+doc)
 	e.trash(t, "/api/v1/cases/"+c+"/life-events/"+ev)
-	require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", "/api/v1/cases/"+c+"/people/"+antonio+"/relationships/"+giuseppe, nil).Code)
+	require.Equal(t, http.StatusOK, e.c.DoV("PATCH", "/api/v1/cases/"+c+"/people/"+antonio, map[string]any{"parent_ids": []string{}}).Code)
 	e.trash(t, "/api/v1/cases/"+c+"/people/"+antonio)
 	e.trash(t, "/api/v1/cases/"+c)
 
@@ -193,7 +193,7 @@ func TestLog_NameCapturedAtTheTime(t *testing.T) {
 	e := newEnv(t)
 	c := e.createCase(t)
 	p := e.createPerson(t, c, "Giuseppe")
-	require.Equal(t, http.StatusOK, e.c.Do("PATCH", "/api/v1/cases/"+c+"/people/"+p, map[string]any{"first_name": "Joseph"}).Code)
+	require.Equal(t, http.StatusOK, e.c.DoV("PATCH", "/api/v1/cases/"+c+"/people/"+p, map[string]any{"first_name": "Joseph"}).Code)
 
 	entries := testhelpers.ActivityLog(t, e.db, c)
 	require.GreaterOrEqual(t, len(entries), 2)
@@ -235,7 +235,7 @@ func TestLog_RestoreAndPermanentDelete(t *testing.T) {
 	}
 	for _, it := range items { // then trash and permanently delete each, children first
 		e.trash(t, it.path)
-		require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", it.path+"/permanent", nil).Code, it.entityType)
+		require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", it.path+"/permanent", nil).Code, it.entityType)
 		entry := e.lastEntry(t, c, it.entityType, ids[it.entityType])
 		assert.Equal(t, "permanently_deleted", entry.Action, it.entityType)
 		assert.NotEmpty(t, entry.EntityName, it.entityType)
@@ -305,7 +305,7 @@ func TestPermanentDeleteCase_WritesDeletionRecord(t *testing.T) {
 	e.trash(t, "/api/v1/cases/"+c)
 	started := time.Now()
 
-	require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", "/api/v1/cases/"+c+"/permanent", nil).Code)
+	require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", "/api/v1/cases/"+c+"/permanent", nil).Code)
 
 	r, ok := readDeletionRecord(t, e.db, c)
 	require.True(t, ok, "no deletion record was written")
@@ -326,7 +326,7 @@ func TestPermanentDeleteCase_RecordFails_CaseNotDeleted(t *testing.T) {
 	e.trash(t, "/api/v1/cases/"+c)
 	testhelpers.FailInserts(t, e.db, "case_deletion_records")
 
-	rec := e.c.Do("DELETE", "/api/v1/cases/"+c+"/permanent", nil)
+	rec := e.c.DoV("DELETE", "/api/v1/cases/"+c+"/permanent", nil)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	var stillThere int
@@ -359,7 +359,7 @@ func TestLog_PermanentDeletePerson_LogsEverythingThatGoesWithThem(t *testing.T) 
 	line := e.c.MustCreate(t, "/api/v1/cases/"+c+"/claim-lines", map[string]any{"root_person_id": p})
 	e.trash(t, "/api/v1/cases/"+c+"/people/"+p)
 
-	require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", "/api/v1/cases/"+c+"/people/"+p+"/permanent", nil).Code)
+	require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", "/api/v1/cases/"+c+"/people/"+p+"/permanent", nil).Code)
 
 	assert.Equal(t, []string{p}, e.permanentlyDeleted(t, c, "person"))
 	assert.ElementsMatch(t, []string{ev1, ev2}, e.permanentlyDeleted(t, c, "life_event"))
@@ -379,7 +379,7 @@ func TestLog_PermanentDeleteLifeEvent_LogsItsDocuments(t *testing.T) {
 	other := e.createDocument(t, c, p, "") // not under the event, so it stays
 	e.trash(t, "/api/v1/cases/"+c+"/life-events/"+ev)
 
-	require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", "/api/v1/cases/"+c+"/life-events/"+ev+"/permanent", nil).Code)
+	require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", "/api/v1/cases/"+c+"/life-events/"+ev+"/permanent", nil).Code)
 
 	assert.Equal(t, []string{ev}, e.permanentlyDeleted(t, c, "life_event"))
 	assert.ElementsMatch(t, []string{d1, d2}, e.permanentlyDeleted(t, c, "document"))

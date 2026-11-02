@@ -15,6 +15,7 @@ type Case struct {
 	Title               string    `json:"title"`
 	Status              string    `json:"status"`
 	PrimaryRootPersonID *string   `json:"primary_root_person_id"`
+	Version             int       `json:"version"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
