@@ -48,6 +48,7 @@ Resources are nested under their owning case.
 - `GET /api/v1/document-statuses` accepts an optional `?phase=` query parameter to filter by phase (`official_copy`, `amendment`, `apostille`, `translation`, `any`). Omitting it returns all statuses.
 - `GET /api/v1/cases/:caseId/trash` lists the trashed entities within a case. `GET /api/v1/trash` lists trashed cases.
 - `GET /api/v1/cases/:caseId/people/:personId/recorded-details` returns everything recorded about a Person, one row per Document
+- `GET /api/v1/cases/:caseId/people/:personId/deletion-impact` and `GET /api/v1/cases/:caseId/life-events/:lifeEventId/deletion-impact` report what deleting the record would take with it, for the confirmation dialog
 
 ### Actions
 
@@ -77,14 +78,15 @@ An operation that is not a plain create, read, update, or delete is a sub-path o
 - **Partial.** Only fields present in the request body are changed. A field sent as `null` is cleared. A field that is absent is left alone.
 - **All or nothing.** A request is applied in one database transaction. If any part of it is invalid or fails, nothing is saved.
 - **One request per save.** A form's Save sends a single request. The frontend does not split a save across several requests.
+- A person's `parent_ids` and `child_ids` are full lists: what is sent replaces the current links. A document's four phase statuses are set through `official_copy_status_id`, `amendment_status_id`, `apostille_status_id` and `translation_status_id`.
 
 ## Concurrent Edits
 
 Case, Person, LifeEvent, Document, and ClaimLine each carry an integer `version` that increases on every change.
 
 - Every response includes the resource's current `version`.
-- A `PATCH` or `DELETE` must include the `version` the client last read.
-- If the resource has changed since, the request is refused with `409` and the code `conflict`, and nothing is saved. The client reloads the resource and the user reapplies their change.
+- A `PATCH` must include the `version` it is based on in its body. A `DELETE` must include it as `?version=`, since a delete has no body. Either is refused as invalid input without it.
+- If the resource has changed since, the request is refused with `409` and the code `version_conflict`, and nothing is saved. The client reloads the resource and the user reapplies their change.
 
 This prevents one user's save from silently overwriting another's.
 
@@ -172,6 +174,7 @@ Validation errors also list each field at fault, with a message a user can act o
 - `message` is always written for the user, not the developer.
 - Each entry in `fields` carries a stable `code` alongside its message, so the wording can later be translated without changing the API.
 - `fields` is present whenever the problem can be tied to specific fields. A request with several invalid fields reports all of them, not only the first.
+- Field error codes include `required`, `invalid_value`, `invalid_date`, `invalid_id` and `unknown_field`. A malformed ID in the URL is also reported as `invalid_input`.
 - The frontend shows field messages beside the fields and the top-level message otherwise. It does not replace a server message with a generic one.
 
 **Common error codes:**
@@ -182,7 +185,8 @@ Validation errors also list each field at fault, with a message a user can act o
 | `invalid_input` | 400 | Request body failed validation |
 | `unauthorized` | 401 | No valid session |
 | `forbidden` | 403 | Session valid but action not permitted |
-| `conflict` | 409 | State conflict: the resource changed since the client read it, or a duplicate |
+| `version_conflict` | 409 | The resource changed since the client read it |
+| `conflict` | 409 | A rule the current state forbids, such as a duplicate or a family-link loop |
 | `internal` | 500 | Unexpected server error |
 
 ## Authentication

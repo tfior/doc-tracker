@@ -14,25 +14,23 @@ import (
 )
 
 var ErrNotFound = fmt.Errorf("document %w", platform.ErrNotFound)
-var ErrInvalidStatus = errors.New("status does not belong to the requested phase")
 
 var validPhases = map[string]bool{
 	"official_copy": true, "amendment": true, "apostille": true, "translation": true,
 }
 
 type Store interface {
+	StatusPhase(ctx context.Context, statusID string) (string, error)
 	IDsForLifeEvent(ctx context.Context, caseID, eventID string) ([]string, error)
 	IDsForPerson(ctx context.Context, caseID, personID string) ([]string, error)
 	Get(ctx context.Context, caseID, id string) (*Document, error)
 	LogName(ctx context.Context, caseID, id string) (string, error)
 	LockActive(ctx context.Context, caseID, id string) (personID string, err error)
-	ListDocuments(ctx context.Context, caseID string, page, perPage int) ([]Document, int, error)
+	ListDocuments(ctx context.Context, caseID string) ([]Document, error)
 	ListDocumentStatuses(ctx context.Context, phase string) ([]DocumentStatus, error)
 	CreateDocument(ctx context.Context, caseID, personID, docType, title string, input UpdateDocumentInput) (*Document, error)
 	UpdateDocument(ctx context.Context, caseID, docID string, input UpdateDocumentInput) (*Document, error)
 	DeleteDocument(ctx context.Context, caseID, docID string) error
-	TransitionStatus(ctx context.Context, caseID, docID string, input TransitionStatusInput) (*Document, error)
-	ReassignDocument(ctx context.Context, caseID, docID string, input ReassignDocumentInput) (*Document, error)
 	RequireActive(ctx context.Context, caseID, docID string) (personID string, err error)
 	TrashedParents(ctx context.Context, caseID, docID string) (personID string, lifeEventID *string, err error)
 	MoveEventDocuments(ctx context.Context, caseID, eventID, personID string) ([]MovedDocument, error)
@@ -49,15 +47,7 @@ func NewStore(db *sql.DB) Store {
 	return &store{db: db}
 }
 
-func (s *store) ListDocuments(ctx context.Context, caseID string, page, perPage int) ([]Document, int, error) {
-	var total int
-	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM active_documents WHERE case_id = $1`, caseID,
-	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count documents: %w", err)
-	}
-
-	offset := (page - 1) * perPage
+func (s *store) ListDocuments(ctx context.Context, caseID string) ([]Document, error) {
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT
 			d.id::text, d.case_id::text, d.person_id::text, d.life_event_id::text,
@@ -70,18 +60,17 @@ func (s *store) ListDocuments(ctx context.Context, caseID string, page, perPage 
 			am.id::text, am.label, am.phase::text, am.progress_bucket::text,
 			ap.id::text, ap.label, ap.phase::text, ap.progress_bucket::text,
 			tr.id::text, tr.label, tr.phase::text, tr.progress_bucket::text,
-			d.created_at, d.updated_at
+			d.version, d.created_at, d.updated_at
 		FROM documents d
 		JOIN document_statuses oc ON oc.id = d.official_copy_status_id
 		JOIN document_statuses am ON am.id = d.amendment_status_id
 		JOIN document_statuses ap ON ap.id = d.apostille_status_id
 		JOIN document_statuses tr ON tr.id = d.translation_status_id
 		WHERE d.id IN (SELECT id FROM active_documents WHERE case_id = $1)
-		ORDER BY d.created_at ASC, d.id ASC
-		LIMIT $2 OFFSET $3`,
-		caseID, perPage, offset)
+		ORDER BY d.created_at ASC, d.id ASC`,
+		caseID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("query documents: %w", err)
+		return nil, fmt.Errorf("query documents: %w", err)
 	}
 	defer rows.Close()
 
@@ -89,15 +78,15 @@ func (s *store) ListDocuments(ctx context.Context, caseID string, page, perPage 
 	for rows.Next() {
 		d, err := scanDocument(rows.Scan)
 		if err != nil {
-			return nil, 0, fmt.Errorf("scan document: %w", err)
+			return nil, fmt.Errorf("scan document: %w", err)
 		}
 		items = append(items, *d)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate documents: %w", err)
+		return nil, fmt.Errorf("iterate documents: %w", err)
 	}
 
-	return items, total, nil
+	return items, nil
 }
 
 func (s *store) ListDocumentStatuses(ctx context.Context, phase string) ([]DocumentStatus, error) {
@@ -204,12 +193,18 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 			recorded_birth_place = CASE WHEN $17 THEN $18        ELSE recorded_birth_place END,
 			notes                = CASE WHEN $19 THEN $20        ELSE notes                END,
 			is_verified          = CASE WHEN $21 THEN $22        ELSE is_verified          END,
+			person_id            = COALESCE($23::uuid, person_id),
+			life_event_id        = CASE WHEN $24 THEN $25::uuid  ELSE life_event_id        END,
+			official_copy_status_id = COALESCE($26::uuid, official_copy_status_id),
+			amendment_status_id     = COALESCE($27::uuid, amendment_status_id),
+			apostille_status_id     = COALESCE($28::uuid, apostille_status_id),
+			translation_status_id   = COALESCE($29::uuid, translation_status_id),
 			verified_at          = CASE
 				WHEN $21 AND $22 = TRUE  THEN NOW()
 				WHEN $21 AND $22 = FALSE THEN NULL
 				ELSE verified_at
 			END,
-			updated_at = NOW()
+			updated_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		docID, caseID,
 		input.Title,
@@ -223,6 +218,9 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 		input.RecordedBirthPlace.Set, nullToSQL(input.RecordedBirthPlace),
 		input.Notes.Set, nullToSQL(input.Notes),
 		isVerifiedSet, isVerifiedValue,
+		input.PersonID,
+		input.LifeEventID.Set, nullToSQL(input.LifeEventID),
+		input.OfficialCopyStatusID, input.AmendmentStatusID, input.ApostilleStatusID, input.TranslationStatusID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update document: %w", err)
@@ -240,7 +238,7 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 
 func (s *store) DeleteDocument(ctx context.Context, caseID, docID string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
-		UPDATE documents SET deleted_at = NOW()
+		UPDATE documents SET deleted_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		docID, caseID,
 	)
@@ -257,67 +255,6 @@ func (s *store) DeleteDocument(ctx context.Context, caseID, docID string) error 
 	return nil
 }
 
-func (s *store) TransitionStatus(ctx context.Context, caseID, docID string, input TransitionStatusInput) (*Document, error) {
-	// Verify the status exists and belongs to the requested phase (or is 'any').
-	var statusPhase string
-	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT phase::text FROM document_statuses WHERE id = $1`, input.StatusID,
-	).Scan(&statusPhase); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrInvalidStatus
-		}
-		return nil, fmt.Errorf("get status phase: %w", err)
-	}
-	if statusPhase != input.Phase && statusPhase != "any" {
-		return nil, ErrInvalidStatus
-	}
-
-	col := phaseColumn(input.Phase)
-	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
-		fmt.Sprintf(`UPDATE documents SET %s = $3, updated_at = NOW()
-			WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`, col),
-		docID, caseID, input.StatusID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("transition status: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("rows affected: %w", err)
-	}
-	if n == 0 {
-		return nil, ErrNotFound
-	}
-
-	return s.getDocument(ctx, caseID, docID)
-}
-
-func (s *store) ReassignDocument(ctx context.Context, caseID, docID string, input ReassignDocumentInput) (*Document, error) {
-
-	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
-		UPDATE documents SET
-			person_id     = $3,
-			life_event_id = CASE WHEN $4 THEN $5::uuid ELSE life_event_id END,
-			updated_at    = NOW()
-		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
-		docID, caseID,
-		input.PersonID,
-		input.LifeEventID.Set, nullToSQL(input.LifeEventID),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("reassign document: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("rows affected: %w", err)
-	}
-	if n == 0 {
-		return nil, ErrNotFound
-	}
-
-	return s.getDocument(ctx, caseID, docID)
-}
-
 func (s *store) getDocument(ctx context.Context, caseID, docID string) (*Document, error) {
 	row := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT
@@ -331,7 +268,7 @@ func (s *store) getDocument(ctx context.Context, caseID, docID string) (*Documen
 			am.id::text, am.label, am.phase::text, am.progress_bucket::text,
 			ap.id::text, ap.label, ap.phase::text, ap.progress_bucket::text,
 			tr.id::text, tr.label, tr.phase::text, tr.progress_bucket::text,
-			d.created_at, d.updated_at
+			d.version, d.created_at, d.updated_at
 		FROM documents d
 		JOIN document_statuses oc ON oc.id = d.official_copy_status_id
 		JOIN document_statuses am ON am.id = d.amendment_status_id
@@ -395,7 +332,7 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 		&d.AmendmentStatus.ID, &d.AmendmentStatus.Label, &d.AmendmentStatus.Phase, &d.AmendmentStatus.ProgressBucket,
 		&d.ApostilleStatus.ID, &d.ApostilleStatus.Label, &d.ApostilleStatus.Phase, &d.ApostilleStatus.ProgressBucket,
 		&d.TranslationStatus.ID, &d.TranslationStatus.Label, &d.TranslationStatus.Phase, &d.TranslationStatus.ProgressBucket,
-		&d.CreatedAt, &d.UpdatedAt,
+		&d.Version, &d.CreatedAt, &d.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -417,21 +354,6 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 	return &d, nil
 }
 
-// phaseColumn returns the documents column name for a given phase.
-// Caller must validate phase before calling.
-func phaseColumn(phase string) string {
-	switch phase {
-	case "official_copy":
-		return "official_copy_status_id"
-	case "amendment":
-		return "amendment_status_id"
-	case "apostille":
-		return "apostille_status_id"
-	default: // "translation"
-		return "translation_status_id"
-	}
-}
-
 func nullToSQL(f platform.NullString) sql.NullString {
 	return sql.NullString{String: f.Value, Valid: f.Valid}
 }
@@ -445,7 +367,7 @@ func setString(dest **string, ns sql.NullString) {
 
 func (s *store) Restore(ctx context.Context, caseID, id string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
-		`UPDATE documents SET deleted_at = NULL WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		`UPDATE documents SET deleted_at = NULL, version = version + 1 WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
 		id, caseID)
 	if err != nil {
 		return fmt.Errorf("restore document: %w", err)
@@ -525,7 +447,7 @@ func (s *store) TrashedParents(ctx context.Context, caseID, docID string) (strin
 // the trash, the event's new person.
 func (s *store) MoveEventDocuments(ctx context.Context, caseID, eventID, personID string) ([]MovedDocument, error) {
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
-		UPDATE documents d SET person_id = $3, updated_at = NOW()
+		UPDATE documents d SET person_id = $3, updated_at = NOW(), version = version + 1
 		FROM (SELECT id, person_id FROM documents
 		      WHERE life_event_id = $1 AND case_id = $2 AND person_id <> $3) old
 		WHERE d.id = old.id
@@ -628,4 +550,20 @@ func (s *store) IDsForLifeEvent(ctx context.Context, caseID, eventID string) ([]
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// StatusPhase returns the phase a status belongs to ("any" for statuses offered
+// in every phase), or ErrNotFound if there is no such status.
+func (s *store) StatusPhase(ctx context.Context, statusID string) (string, error) {
+	var phase string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT phase::text FROM document_statuses WHERE id = $1`, statusID,
+	).Scan(&phase)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("status phase: %w", err)
+	}
+	return phase, nil
 }

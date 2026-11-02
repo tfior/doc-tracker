@@ -17,15 +17,15 @@ import (
 var ErrNotFound = fmt.Errorf("life event %w", platform.ErrNotFound)
 
 type Store interface {
+	DeletionImpact(ctx context.Context, caseID, eventID string) (*DeletionImpact, error)
 	IDsForPerson(ctx context.Context, caseID, personID string) ([]string, error)
 	Get(ctx context.Context, caseID, id string) (*LifeEvent, error)
 	LogName(ctx context.Context, caseID, id string) (string, error)
 	LockActive(ctx context.Context, caseID, id string) (personID string, err error)
-	ListLifeEvents(ctx context.Context, caseID string, page, perPage int) ([]LifeEvent, int, error)
+	ListLifeEvents(ctx context.Context, caseID string) ([]LifeEvent, error)
 	CreateLifeEvent(ctx context.Context, caseID, personID, eventType string, input UpdateLifeEventInput) (*LifeEvent, error)
 	UpdateLifeEvent(ctx context.Context, caseID, eventID string, input UpdateLifeEventInput) (*LifeEvent, error)
 	DeleteLifeEvent(ctx context.Context, caseID, eventID string) error
-	ReassignLifeEvent(ctx context.Context, caseID, eventID, personID string) (*LifeEvent, error)
 	RequireActive(ctx context.Context, caseID, eventID string) (personID string, err error)
 	TrashedPersonID(ctx context.Context, caseID, eventID string) (string, error)
 	Restore(ctx context.Context, caseID, id string) error
@@ -40,15 +40,7 @@ func NewStore(db *sql.DB) Store {
 	return &store{db: db}
 }
 
-func (s *store) ListLifeEvents(ctx context.Context, caseID string, page, perPage int) ([]LifeEvent, int, error) {
-	var total int
-	if err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM active_life_events WHERE case_id = $1`, caseID,
-	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count life events: %w", err)
-	}
-
-	offset := (page - 1) * perPage
+func (s *store) ListLifeEvents(ctx context.Context, caseID string) ([]LifeEvent, error) {
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT
 			le.id::text, le.case_id::text, le.person_id::text,
@@ -57,16 +49,15 @@ func (s *store) ListLifeEvents(ctx context.Context, caseID string, page, perPage
 			le.spouse_name, le.spouse_birth_date::text, le.spouse_birth_place,
 			le.notes,
 			COUNT(d.id) > 0 AS has_documents,
-			le.created_at, le.updated_at
+			le.version, le.created_at, le.updated_at
 		FROM life_events le
 		LEFT JOIN active_documents d ON d.life_event_id = le.id
 		WHERE le.id IN (SELECT id FROM active_life_events WHERE case_id = $1)
 		GROUP BY le.id
-		ORDER BY le.event_date ASC NULLS LAST, le.created_at ASC, le.id ASC
-		LIMIT $2 OFFSET $3`,
-		caseID, perPage, offset)
+		ORDER BY le.event_date ASC NULLS LAST, le.created_at ASC, le.id ASC`,
+		caseID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("query life events: %w", err)
+		return nil, fmt.Errorf("query life events: %w", err)
 	}
 	defer rows.Close()
 
@@ -74,15 +65,15 @@ func (s *store) ListLifeEvents(ctx context.Context, caseID string, page, perPage
 	for rows.Next() {
 		le, err := scanLifeEvent(rows.Scan)
 		if err != nil {
-			return nil, 0, fmt.Errorf("scan life event: %w", err)
+			return nil, fmt.Errorf("scan life event: %w", err)
 		}
 		items = append(items, *le)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate life events: %w", err)
+		return nil, fmt.Errorf("iterate life events: %w", err)
 	}
 
-	return items, total, nil
+	return items, nil
 }
 
 func (s *store) CreateLifeEvent(ctx context.Context, caseID, personID, eventType string, input UpdateLifeEventInput) (*LifeEvent, error) {
@@ -113,13 +104,14 @@ func (s *store) UpdateLifeEvent(ctx context.Context, caseID, eventID string, inp
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE life_events SET
 			event_type        = COALESCE($3::life_event_type, event_type),
+			person_id         = COALESCE($16::uuid, person_id),
 			event_date        = CASE WHEN $4  THEN $5::date  ELSE event_date        END,
 			event_place       = CASE WHEN $6  THEN $7        ELSE event_place       END,
 			spouse_name       = CASE WHEN $8  THEN $9        ELSE spouse_name       END,
 			spouse_birth_date = CASE WHEN $10 THEN $11::date ELSE spouse_birth_date END,
 			spouse_birth_place= CASE WHEN $12 THEN $13       ELSE spouse_birth_place END,
 			notes             = CASE WHEN $14 THEN $15       ELSE notes             END,
-			updated_at        = NOW()
+			updated_at        = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		eventID, caseID,
 		input.EventType,
@@ -129,6 +121,7 @@ func (s *store) UpdateLifeEvent(ctx context.Context, caseID, eventID string, inp
 		input.SpouseBirthDate.Set, nullToSQL(input.SpouseBirthDate),
 		input.SpouseBirthPlace.Set, nullToSQL(input.SpouseBirthPlace),
 		input.Notes.Set, nullToSQL(input.Notes),
+		input.PersonID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update life event: %w", err)
@@ -146,7 +139,7 @@ func (s *store) UpdateLifeEvent(ctx context.Context, caseID, eventID string, inp
 
 func (s *store) DeleteLifeEvent(ctx context.Context, caseID, eventID string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
-		UPDATE life_events SET deleted_at = NOW()
+		UPDATE life_events SET deleted_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		eventID, caseID,
 	)
@@ -163,27 +156,6 @@ func (s *store) DeleteLifeEvent(ctx context.Context, caseID, eventID string) err
 	return nil
 }
 
-func (s *store) ReassignLifeEvent(ctx context.Context, caseID, eventID, personID string) (*LifeEvent, error) {
-
-	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
-		UPDATE life_events SET person_id = $3, updated_at = NOW()
-		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
-		eventID, caseID, personID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("reassign life event: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("rows affected: %w", err)
-	}
-	if n == 0 {
-		return nil, ErrNotFound
-	}
-
-	return s.getLifeEvent(ctx, caseID, eventID)
-}
-
 // getLifeEvent fetches a single non-deleted life event by ID and case, including
 // the has_documents flag.
 func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*LifeEvent, error) {
@@ -195,7 +167,7 @@ func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*Life
 			le.spouse_name, le.spouse_birth_date::text, le.spouse_birth_place,
 			le.notes,
 			COUNT(d.id) > 0 AS has_documents,
-			le.created_at, le.updated_at
+			le.version, le.created_at, le.updated_at
 		FROM life_events le
 		LEFT JOIN active_documents d ON d.life_event_id = le.id
 		WHERE le.id = $1 AND le.case_id = $2 AND le.deleted_at IS NULL
@@ -224,7 +196,7 @@ func scanLifeEvent(scan func(...any) error) (*LifeEvent, error) {
 		&spouseName, &spouseBirthDate, &spouseBirthPlace,
 		&notes,
 		&le.HasDocuments,
-		&le.CreatedAt, &le.UpdatedAt,
+		&le.Version, &le.CreatedAt, &le.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -290,7 +262,7 @@ func (s *store) TrashedPersonID(ctx context.Context, caseID, eventID string) (st
 
 func (s *store) Restore(ctx context.Context, caseID, id string) error {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
-		`UPDATE life_events SET deleted_at = NULL WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		`UPDATE life_events SET deleted_at = NULL, version = version + 1 WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
 		id, caseID)
 	if err != nil {
 		return fmt.Errorf("restore life event: %w", err)
@@ -368,4 +340,18 @@ func (s *store) IDsForPerson(ctx context.Context, caseID, personID string) ([]st
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// DeletionImpact counts the active documents under a life event, which would
+// go with it.
+func (s *store) DeletionImpact(ctx context.Context, caseID, eventID string) (*DeletionImpact, error) {
+	var d DeletionImpact
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM active_documents WHERE case_id = $1 AND life_event_id = $2`,
+		caseID, eventID,
+	).Scan(&d.Documents)
+	if err != nil {
+		return nil, fmt.Errorf("deletion impact: %w", err)
+	}
+	return &d, nil
 }

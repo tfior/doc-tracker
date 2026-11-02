@@ -16,6 +16,7 @@ type ClaimLine struct {
 	RootPersonID string    `json:"root_person_id"`
 	Status       string    `json:"status"`
 	Notes        *string   `json:"notes"`
+	Version      int       `json:"version"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

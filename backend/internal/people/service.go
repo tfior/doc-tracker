@@ -30,11 +30,19 @@ func NewService(store Store, db *sql.DB, log *activitylog.Service, cases CaseChe
 	return &Service{store: store, db: db, log: log, rec: log.For("person", store.LogName), cases: cases}
 }
 
-func (s *Service) ListPeople(ctx context.Context, caseID string, page, perPage int) ([]Person, int, error) {
+func (s *Service) ListPeople(ctx context.Context, caseID string) ([]Person, error) {
 	if err := s.cases.RequireActive(ctx, caseID); err != nil {
-		return nil, 0, platform.MapNotFound(err, ErrNotFound)
+		return nil, platform.MapNotFound(err, ErrNotFound)
 	}
-	return s.store.ListPeople(ctx, caseID, page, perPage)
+	return s.store.ListPeople(ctx, caseID)
+}
+
+// DeletionImpact reports what deleting a person would take with them.
+func (s *Service) DeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error) {
+	if err := s.store.RequireActive(ctx, caseID, personID); err != nil {
+		return nil, err
+	}
+	return s.store.DeletionImpact(ctx, caseID, personID)
 }
 
 // RequireActive returns an error wrapping platform.ErrNotFound unless the person
@@ -54,7 +62,14 @@ func (s *Service) CreatePerson(ctx context.Context, caseID, firstName, lastName 
 		if p, err = s.store.CreatePerson(ctx, caseID, firstName, lastName, input); err != nil {
 			return err
 		}
-		return s.rec.Record(ctx, caseID, "created", p.ID, nil)
+		if err := s.rec.Record(ctx, caseID, "created", p.ID, nil); err != nil {
+			return err
+		}
+		if err := s.setLinks(ctx, caseID, p.ID, input.ParentIDs, input.ChildIDs); err != nil {
+			return err
+		}
+		p, err = s.store.Get(ctx, caseID, p.ID)
+		return err
 	})
 	return p, err
 }
@@ -69,7 +84,16 @@ func (s *Service) UpdatePerson(ctx context.Context, caseID, personID string, inp
 		if err != nil {
 			return err
 		}
-		if p, err = s.store.UpdatePerson(ctx, caseID, personID, input); err != nil {
+		if err := platform.CheckVersion(before.Version, input.Version); err != nil {
+			return err
+		}
+		if _, err = s.store.UpdatePerson(ctx, caseID, personID, input); err != nil {
+			return err
+		}
+		if err := s.setLinks(ctx, caseID, personID, input.ParentIDs, input.ChildIDs); err != nil {
+			return err
+		}
+		if p, err = s.store.Get(ctx, caseID, personID); err != nil {
 			return err
 		}
 		return s.rec.Record(ctx, caseID, "updated", personID, activitylog.Diff(before.logFields(), p.logFields()))
@@ -77,9 +101,16 @@ func (s *Service) UpdatePerson(ctx context.Context, caseID, personID string, inp
 	return p, err
 }
 
-func (s *Service) DeletePerson(ctx context.Context, caseID, personID string) error {
+func (s *Service) DeletePerson(ctx context.Context, caseID, personID string, version int) error {
 	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
 		if err := s.store.LockActive(ctx, caseID, personID); err != nil {
+			return err
+		}
+		before, err := s.store.Get(ctx, caseID, personID)
+		if err != nil {
+			return err
+		}
+		if err := platform.CheckVersion(before.Version, version); err != nil {
 			return err
 		}
 		if err := s.store.DeletePerson(ctx, caseID, personID); err != nil {
@@ -89,36 +120,98 @@ func (s *Service) DeletePerson(ctx context.Context, caseID, personID string) err
 	})
 }
 
-func (s *Service) AddParent(ctx context.Context, caseID, personID, parentID string) (*Relationship, error) {
-	var rel *Relationship
-	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
-		if err := s.store.LockPeople(ctx, personID, parentID); err != nil {
+// setLinks makes the person's active parents and children exactly the lists
+// given. A nil list leaves that side unchanged. Removals happen before
+// additions, so replacing a parent stays within the two-parent limit, and every
+// addition goes through the loop and limit checks.
+func (s *Service) setLinks(ctx context.Context, caseID, personID string, parentIDs, childIDs *[]string) error {
+	if parentIDs == nil && childIDs == nil {
+		return nil
+	}
+	currentParents, err := s.store.ActiveParentIDs(ctx, personID)
+	if err != nil {
+		return err
+	}
+	currentChildren, err := s.store.ActiveChildIDs(ctx, personID)
+	if err != nil {
+		return err
+	}
+
+	// Lock everyone involved, in one ordered call, so concurrent link changes
+	// touching any of them run one at a time.
+	involved := append([]string{personID}, currentParents...)
+	involved = append(involved, currentChildren...)
+	if parentIDs != nil {
+		involved = append(involved, *parentIDs...)
+	}
+	if childIDs != nil {
+		involved = append(involved, *childIDs...)
+	}
+	if err := s.store.LockPeople(ctx, involved...); err != nil {
+		return err
+	}
+
+	type link struct{ child, parent string }
+	var remove, add []link
+	if parentIDs != nil {
+		for _, id := range difference(currentParents, *parentIDs) {
+			remove = append(remove, link{personID, id})
+		}
+		for _, id := range difference(*parentIDs, currentParents) {
+			add = append(add, link{personID, id})
+		}
+	}
+	if childIDs != nil {
+		for _, id := range difference(currentChildren, *childIDs) {
+			remove = append(remove, link{id, personID})
+		}
+		for _, id := range difference(*childIDs, currentChildren) {
+			add = append(add, link{id, personID})
+		}
+	}
+
+	for _, l := range remove {
+		if err := s.store.RemoveParent(ctx, caseID, l.child, l.parent); err != nil {
 			return err
 		}
-		for _, id := range []string{personID, parentID} {
+		if err := s.recordLink(ctx, caseID, "deleted", l.child, l.parent); err != nil {
+			return err
+		}
+	}
+	for _, l := range add {
+		if l.child == l.parent {
+			return platform.Invalid("A person cannot be their own parent.")
+		}
+		for _, id := range []string{l.child, l.parent} {
 			if err := s.store.RequireActive(ctx, caseID, id); err != nil {
 				return err
 			}
 		}
-		var err error
-		if rel, err = s.store.AddParent(ctx, caseID, personID, parentID); err != nil {
+		if _, err := s.store.AddParent(ctx, caseID, l.child, l.parent); err != nil {
 			return err
 		}
-		return s.recordLink(ctx, caseID, "created", personID, parentID)
-	})
-	return rel, err
+		if err := s.recordLink(ctx, caseID, "created", l.child, l.parent); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (s *Service) RemoveParent(ctx context.Context, caseID, personID, parentID string) error {
-	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
-		if err := s.store.LockActive(ctx, caseID, personID); err != nil {
-			return err
+// difference returns the IDs in a that are not in b, each once.
+func difference(a, b []string) []string {
+	inB := make(map[string]bool, len(b))
+	for _, id := range b {
+		inB[id] = true
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range a {
+		if !inB[id] && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
 		}
-		if err := s.store.RemoveParent(ctx, caseID, personID, parentID); err != nil {
-			return err
-		}
-		return s.recordLink(ctx, caseID, "deleted", personID, parentID)
-	})
+	}
+	return out
 }
 
 // Restore takes a person out of the trash. Called by the trash module.

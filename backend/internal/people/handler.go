@@ -5,7 +5,6 @@
 package people
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -25,206 +24,135 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/cases/{caseId}/people", h.createPerson)
 	mux.HandleFunc("PATCH /api/v1/cases/{caseId}/people/{personId}", h.updatePerson)
 	mux.HandleFunc("DELETE /api/v1/cases/{caseId}/people/{personId}", h.deletePerson)
-	mux.HandleFunc("POST /api/v1/cases/{caseId}/people/{personId}/relationships", h.addParent)
-	mux.HandleFunc("DELETE /api/v1/cases/{caseId}/people/{personId}/relationships/{parentId}", h.removeParent)
+	mux.HandleFunc("GET /api/v1/cases/{caseId}/people/{personId}/deletion-impact", h.deletionImpact)
 }
 
-func (h *Handler) listPeople(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-
-	page, perPage, ok := platform.ParsePagination(w, r)
-	if !ok {
-		return
-	}
-
-	items, total, err := h.svc.ListPeople(r.Context(), caseID, page, perPage)
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
-		return
-	}
-	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
-		return
-	}
-
-	platform.JSON(w, http.StatusOK, platform.ListResponse{
-		Items:   items,
-		Total:   total,
-		Page:    page,
-		PerPage: perPage,
-	})
-}
-
-func (h *Handler) createPerson(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-
-	var body struct {
-		FirstName  string              `json:"first_name"`
-		LastName   string              `json:"last_name"`
-		BirthDate  platform.NullString `json:"birth_date"`
-		BirthPlace platform.NullString `json:"birth_place"`
-		DeathDate  platform.NullString `json:"death_date"`
-		Notes      platform.NullString `json:"notes"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
-		return
-	}
-	if body.FirstName == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "first_name is required")
-		return
-	}
-	if body.LastName == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "last_name is required")
-		return
-	}
-
-	input := UpdatePersonInput{
-		BirthDate:  body.BirthDate,
-		BirthPlace: body.BirthPlace,
-		DeathDate:  body.DeathDate,
-		Notes:      body.Notes,
-	}
-
-	p, err := h.svc.CreatePerson(r.Context(), caseID, body.FirstName, body.LastName, input)
+// respondError writes the response for an error from the service.
+func respondError(w http.ResponseWriter, r *http.Request, err error, notFound string) {
 	if platform.WriteError(w, err) {
 		return
 	}
 	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
+		platform.Error(w, http.StatusNotFound, "not_found", notFound)
 		return
 	}
-	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
-		return
-	}
+	platform.ServerError(w, r, err)
+}
 
+// personFields is the body shared by create and update.
+type personFields struct {
+	FirstName  *string             `json:"first_name"`
+	LastName   *string             `json:"last_name"`
+	BirthDate  platform.NullString `json:"birth_date"`
+	BirthPlace platform.NullString `json:"birth_place"`
+	DeathDate  platform.NullString `json:"death_date"`
+	Notes      platform.NullString `json:"notes"`
+	ParentIDs  *[]string           `json:"parent_ids"`
+	ChildIDs   *[]string           `json:"child_ids"`
+}
+
+func (f *personFields) validate(v *platform.Validator) {
+	platform.Trim(f.FirstName)
+	platform.Trim(f.LastName)
+	v.NotBlank("first_name", f.FirstName)
+	v.NotBlank("last_name", f.LastName)
+	v.Date("birth_date", f.BirthDate)
+	v.Date("death_date", f.DeathDate)
+	if f.ParentIDs != nil {
+		v.IDs("parent_ids", *f.ParentIDs)
+	}
+	if f.ChildIDs != nil {
+		v.IDs("child_ids", *f.ChildIDs)
+	}
+}
+
+func (f *personFields) input() UpdatePersonInput {
+	return UpdatePersonInput{
+		FirstName: f.FirstName, LastName: f.LastName,
+		BirthDate: f.BirthDate, BirthPlace: f.BirthPlace, DeathDate: f.DeathDate, Notes: f.Notes,
+		ParentIDs: f.ParentIDs, ChildIDs: f.ChildIDs,
+	}
+}
+
+func (h *Handler) listPeople(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListPeople(r.Context(), r.PathValue("caseId"))
+	if err != nil {
+		respondError(w, r, err, "Case not found")
+		return
+	}
+	platform.JSON(w, http.StatusOK, platform.Items{Items: items, Total: len(items)})
+}
+
+func (h *Handler) createPerson(w http.ResponseWriter, r *http.Request) {
+	var body personFields
+	if err := platform.Decode(r, &body); err != nil {
+		respondError(w, r, err, "")
+		return
+	}
+	var v platform.Validator
+	if body.FirstName == nil {
+		v.Required("first_name", "")
+	}
+	if body.LastName == nil {
+		v.Required("last_name", "")
+	}
+	body.validate(&v)
+	if err := v.Err(); err != nil {
+		respondError(w, r, err, "")
+		return
+	}
+	p, err := h.svc.CreatePerson(r.Context(), r.PathValue("caseId"), *body.FirstName, *body.LastName, body.input())
+	if err != nil {
+		respondError(w, r, err, "Case or person not found")
+		return
+	}
 	platform.JSON(w, http.StatusCreated, p)
 }
 
 func (h *Handler) updatePerson(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	personID := r.PathValue("personId")
-
 	var body struct {
-		FirstName  *string             `json:"first_name"`
-		LastName   *string             `json:"last_name"`
-		BirthDate  platform.NullString `json:"birth_date"`
-		BirthPlace platform.NullString `json:"birth_place"`
-		DeathDate  platform.NullString `json:"death_date"`
-		Notes      platform.NullString `json:"notes"`
+		Version *int `json:"version"`
+		personFields
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
+	if err := platform.Decode(r, &body); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-	if body.FirstName != nil && *body.FirstName == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "first_name must not be empty")
+	var v platform.Validator
+	v.Version(body.Version)
+	body.validate(&v)
+	if err := v.Err(); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-	if body.LastName != nil && *body.LastName == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "last_name must not be empty")
-		return
-	}
-
-	input := UpdatePersonInput{
-		FirstName:  body.FirstName,
-		LastName:   body.LastName,
-		BirthDate:  body.BirthDate,
-		BirthPlace: body.BirthPlace,
-		DeathDate:  body.DeathDate,
-		Notes:      body.Notes,
-	}
-
-	p, err := h.svc.UpdatePerson(r.Context(), caseID, personID, input)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
-		return
-	}
+	input := body.input()
+	input.Version = *body.Version
+	p, err := h.svc.UpdatePerson(r.Context(), r.PathValue("caseId"), r.PathValue("personId"), input)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "Person not found")
 		return
 	}
-
 	platform.JSON(w, http.StatusOK, p)
 }
 
 func (h *Handler) deletePerson(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	personID := r.PathValue("personId")
-
-	err := h.svc.DeletePerson(r.Context(), caseID, personID)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
-		return
-	}
+	version, err := platform.QueryVersion(r)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "")
 		return
 	}
-
+	if err := h.svc.DeletePerson(r.Context(), r.PathValue("caseId"), r.PathValue("personId"), version); err != nil {
+		respondError(w, r, err, "Person not found")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) addParent(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	personID := r.PathValue("personId")
-
-	var body struct {
-		ParentID string `json:"parent_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
-		return
-	}
-	if body.ParentID == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "parent_id is required")
-		return
-	}
-	if body.ParentID == personID {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "a person cannot be their own parent")
-		return
-	}
-
-	rel, err := h.svc.AddParent(r.Context(), caseID, personID, body.ParentID)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Person not found")
-		return
-	}
+func (h *Handler) deletionImpact(w http.ResponseWriter, r *http.Request) {
+	impact, err := h.svc.DeletionImpact(r.Context(), r.PathValue("caseId"), r.PathValue("personId"))
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "Person not found")
 		return
 	}
-
-	platform.JSON(w, http.StatusCreated, rel)
-}
-
-func (h *Handler) removeParent(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	personID := r.PathValue("personId")
-	parentID := r.PathValue("parentId")
-
-	err := h.svc.RemoveParent(r.Context(), caseID, personID, parentID)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Relationship not found")
-		return
-	}
-	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	platform.JSON(w, http.StatusOK, impact)
 }

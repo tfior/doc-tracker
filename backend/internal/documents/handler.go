@@ -5,7 +5,6 @@
 package documents
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -31,275 +30,173 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/cases/{caseId}/documents", h.createDocument)
 	mux.HandleFunc("PATCH /api/v1/cases/{caseId}/documents/{docId}", h.updateDocument)
 	mux.HandleFunc("DELETE /api/v1/cases/{caseId}/documents/{docId}", h.deleteDocument)
-	mux.HandleFunc("PATCH /api/v1/cases/{caseId}/documents/{docId}/status", h.transitionStatus)
-	mux.HandleFunc("PATCH /api/v1/cases/{caseId}/documents/{docId}/parent", h.reassignDocument)
+}
+
+// respondError writes the response for an error from the service.
+func respondError(w http.ResponseWriter, r *http.Request, err error, notFound string) {
+	if platform.WriteError(w, err) {
+		return
+	}
+	if errors.Is(err, ErrNotFound) {
+		platform.Error(w, http.StatusNotFound, "not_found", notFound)
+		return
+	}
+	platform.ServerError(w, r, err)
+}
+
+// documentFields is the body shared by create and update.
+type documentFields struct {
+	LifeEventID        platform.NullString `json:"life_event_id"`
+	DocumentType       *string             `json:"document_type"`
+	Title              *string             `json:"title"`
+	IssuingAuthority   platform.NullString `json:"issuing_authority"`
+	IssueDate          platform.NullString `json:"issue_date"`
+	RecordedDate       platform.NullString `json:"recorded_date"`
+	RecordedGivenName  platform.NullString `json:"recorded_given_name"`
+	RecordedSurname    platform.NullString `json:"recorded_surname"`
+	RecordedBirthDate  platform.NullString `json:"recorded_birth_date"`
+	RecordedBirthPlace platform.NullString `json:"recorded_birth_place"`
+	Notes              platform.NullString `json:"notes"`
+	IsVerified         *bool               `json:"is_verified"`
+}
+
+func (f *documentFields) validate(v *platform.Validator) {
+	platform.Trim(f.Title)
+	v.NotBlank("title", f.Title)
+	if f.DocumentType != nil {
+		v.OneOf("document_type", *f.DocumentType, validDocumentTypes)
+	}
+	if f.LifeEventID.Set && f.LifeEventID.Valid {
+		v.ID("life_event_id", f.LifeEventID.Value)
+	}
+	v.Date("issue_date", f.IssueDate)
+	v.Date("recorded_date", f.RecordedDate)
+	v.Date("recorded_birth_date", f.RecordedBirthDate)
+}
+
+func (f *documentFields) input() UpdateDocumentInput {
+	return UpdateDocumentInput{
+		LifeEventID: f.LifeEventID, DocumentType: f.DocumentType, Title: f.Title,
+		IssuingAuthority: f.IssuingAuthority, IssueDate: f.IssueDate, RecordedDate: f.RecordedDate,
+		RecordedGivenName: f.RecordedGivenName, RecordedSurname: f.RecordedSurname,
+		RecordedBirthDate: f.RecordedBirthDate, RecordedBirthPlace: f.RecordedBirthPlace,
+		Notes: f.Notes, IsVerified: f.IsVerified,
+	}
 }
 
 func (h *Handler) listDocumentStatuses(w http.ResponseWriter, r *http.Request) {
 	phase := r.URL.Query().Get("phase")
 	if phase != "" && !validPhases[phase] {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "phase must be one of: official_copy, amendment, apostille, translation")
+		respondError(w, r, platform.InvalidField("phase", "invalid_value",
+			"phase must be one of: official_copy, amendment, apostille, translation"), "")
 		return
 	}
-
 	statuses, err := h.svc.ListDocumentStatuses(r.Context(), phase)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		platform.ServerError(w, r, err)
 		return
 	}
 	platform.JSON(w, http.StatusOK, statuses)
 }
 
 func (h *Handler) listDocuments(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-
-	page, perPage, ok := platform.ParsePagination(w, r)
-	if !ok {
-		return
-	}
-
-	items, total, err := h.svc.ListDocuments(r.Context(), caseID, page, perPage)
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Case not found")
-		return
-	}
+	items, err := h.svc.ListDocuments(r.Context(), r.PathValue("caseId"))
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "Case not found")
 		return
 	}
-
-	platform.JSON(w, http.StatusOK, platform.ListResponse{
-		Items:   items,
-		Total:   total,
-		Page:    page,
-		PerPage: perPage,
-	})
+	platform.JSON(w, http.StatusOK, platform.Items{Items: items, Total: len(items)})
 }
 
 func (h *Handler) createDocument(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-
 	var body struct {
-		PersonID           string              `json:"person_id"`
-		DocumentType       string              `json:"document_type"`
-		Title              string              `json:"title"`
-		LifeEventID        platform.NullString `json:"life_event_id"`
-		IssuingAuthority   platform.NullString `json:"issuing_authority"`
-		IssueDate          platform.NullString `json:"issue_date"`
-		RecordedDate       platform.NullString `json:"recorded_date"`
-		RecordedGivenName  platform.NullString `json:"recorded_given_name"`
-		RecordedSurname    platform.NullString `json:"recorded_surname"`
-		RecordedBirthDate  platform.NullString `json:"recorded_birth_date"`
-		RecordedBirthPlace platform.NullString `json:"recorded_birth_place"`
-		Notes              platform.NullString `json:"notes"`
+		PersonID string `json:"person_id"`
+		documentFields
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
+	if err := platform.Decode(r, &body); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-	if body.PersonID == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "person_id is required")
+	var v platform.Validator
+	v.Required("person_id", body.PersonID)
+	v.ID("person_id", body.PersonID)
+	if body.DocumentType == nil {
+		v.Required("document_type", "")
+	}
+	if body.Title == nil {
+		v.Required("title", "")
+	}
+	body.validate(&v)
+	if err := v.Err(); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-	if body.DocumentType == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "document_type is required")
-		return
-	}
-	if !validDocumentTypes[body.DocumentType] {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid document_type")
-		return
-	}
-	if body.Title == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "title is required")
-		return
-	}
-
-	input := UpdateDocumentInput{
-		LifeEventID:        body.LifeEventID,
-		IssuingAuthority:   body.IssuingAuthority,
-		IssueDate:          body.IssueDate,
-		RecordedDate:       body.RecordedDate,
-		RecordedGivenName:  body.RecordedGivenName,
-		RecordedSurname:    body.RecordedSurname,
-		RecordedBirthDate:  body.RecordedBirthDate,
-		RecordedBirthPlace: body.RecordedBirthPlace,
-		Notes:              body.Notes,
-	}
-
-	d, err := h.svc.CreateDocument(r.Context(), caseID, body.PersonID, body.DocumentType, body.Title, input)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Person or life event not found")
-		return
-	}
+	d, err := h.svc.CreateDocument(r.Context(), r.PathValue("caseId"), body.PersonID, *body.DocumentType, *body.Title, body.input())
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "Person or life event not found")
 		return
 	}
-
 	platform.JSON(w, http.StatusCreated, d)
 }
 
 func (h *Handler) updateDocument(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	docID := r.PathValue("docId")
-
 	var body struct {
-		Title              *string             `json:"title"`
-		DocumentType       *string             `json:"document_type"`
-		IssuingAuthority   platform.NullString `json:"issuing_authority"`
-		IssueDate          platform.NullString `json:"issue_date"`
-		RecordedDate       platform.NullString `json:"recorded_date"`
-		RecordedGivenName  platform.NullString `json:"recorded_given_name"`
-		RecordedSurname    platform.NullString `json:"recorded_surname"`
-		RecordedBirthDate  platform.NullString `json:"recorded_birth_date"`
-		RecordedBirthPlace platform.NullString `json:"recorded_birth_place"`
-		Notes              platform.NullString `json:"notes"`
-		IsVerified         *bool               `json:"is_verified"`
+		Version              *int    `json:"version"`
+		PersonID             *string `json:"person_id"`
+		OfficialCopyStatusID *string `json:"official_copy_status_id"`
+		AmendmentStatusID    *string `json:"amendment_status_id"`
+		ApostilleStatusID    *string `json:"apostille_status_id"`
+		TranslationStatusID  *string `json:"translation_status_id"`
+		documentFields
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
+	if err := platform.Decode(r, &body); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-	if body.Title != nil && *body.Title == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "title must not be empty")
+	var v platform.Validator
+	v.Version(body.Version)
+	if body.PersonID != nil {
+		v.Required("person_id", *body.PersonID)
+		v.ID("person_id", *body.PersonID)
+	}
+	for field, id := range map[string]*string{
+		"official_copy_status_id": body.OfficialCopyStatusID, "amendment_status_id": body.AmendmentStatusID,
+		"apostille_status_id": body.ApostilleStatusID, "translation_status_id": body.TranslationStatusID,
+	} {
+		if id != nil {
+			v.Required(field, *id)
+			v.ID(field, *id)
+		}
+	}
+	body.validate(&v)
+	if err := v.Err(); err != nil {
+		respondError(w, r, err, "")
 		return
 	}
-	if body.DocumentType != nil && !validDocumentTypes[*body.DocumentType] {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid document_type")
-		return
-	}
-
-	input := UpdateDocumentInput{
-		Title:              body.Title,
-		DocumentType:       body.DocumentType,
-		IssuingAuthority:   body.IssuingAuthority,
-		IssueDate:          body.IssueDate,
-		RecordedDate:       body.RecordedDate,
-		RecordedGivenName:  body.RecordedGivenName,
-		RecordedSurname:    body.RecordedSurname,
-		RecordedBirthDate:  body.RecordedBirthDate,
-		RecordedBirthPlace: body.RecordedBirthPlace,
-		Notes:              body.Notes,
-		IsVerified:         body.IsVerified,
-	}
-
-	d, err := h.svc.UpdateDocument(r.Context(), caseID, docID, input)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Document not found")
-		return
-	}
+	input := body.input()
+	input.Version = *body.Version
+	input.PersonID = body.PersonID
+	input.OfficialCopyStatusID = body.OfficialCopyStatusID
+	input.AmendmentStatusID = body.AmendmentStatusID
+	input.ApostilleStatusID = body.ApostilleStatusID
+	input.TranslationStatusID = body.TranslationStatusID
+	d, err := h.svc.UpdateDocument(r.Context(), r.PathValue("caseId"), r.PathValue("docId"), input)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "Document, person, or life event not found")
 		return
 	}
-
 	platform.JSON(w, http.StatusOK, d)
 }
 
 func (h *Handler) deleteDocument(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	docID := r.PathValue("docId")
-
-	err := h.svc.DeleteDocument(r.Context(), caseID, docID)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Document not found")
-		return
-	}
+	version, err := platform.QueryVersion(r)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		respondError(w, r, err, "")
 		return
 	}
-
+	if err := h.svc.DeleteDocument(r.Context(), r.PathValue("caseId"), r.PathValue("docId"), version); err != nil {
+		respondError(w, r, err, "Document not found")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) transitionStatus(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	docID := r.PathValue("docId")
-
-	var body struct {
-		Phase    string `json:"phase"`
-		StatusID string `json:"status_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
-		return
-	}
-	if !validPhases[body.Phase] {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "phase must be one of: official_copy, amendment, apostille, translation")
-		return
-	}
-	if body.StatusID == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "status_id is required")
-		return
-	}
-
-	d, err := h.svc.TransitionStatus(r.Context(), caseID, docID, TransitionStatusInput{
-		Phase:    body.Phase,
-		StatusID: body.StatusID,
-	})
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Document not found")
-		return
-	}
-	if errors.Is(err, ErrInvalidStatus) {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "status does not belong to the requested phase")
-		return
-	}
-	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
-		return
-	}
-
-	platform.JSON(w, http.StatusOK, d)
-}
-
-func (h *Handler) reassignDocument(w http.ResponseWriter, r *http.Request) {
-	caseID := r.PathValue("caseId")
-	docID := r.PathValue("docId")
-
-	var body struct {
-		PersonID    string              `json:"person_id"`
-		LifeEventID platform.NullString `json:"life_event_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "invalid request body")
-		return
-	}
-	if body.PersonID == "" {
-		platform.Error(w, http.StatusBadRequest, "invalid_input", "person_id is required")
-		return
-	}
-
-	input := ReassignDocumentInput{
-		PersonID:    body.PersonID,
-		LifeEventID: body.LifeEventID,
-	}
-
-	d, err := h.svc.ReassignDocument(r.Context(), caseID, docID, input)
-	if platform.WriteError(w, err) {
-		return
-	}
-	if errors.Is(err, ErrNotFound) {
-		platform.Error(w, http.StatusNotFound, "not_found", "Document, person, or life event not found")
-		return
-	}
-	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
-		return
-	}
-
-	platform.JSON(w, http.StatusOK, d)
 }

@@ -228,11 +228,11 @@ API
 
 ### Frontend
 
-- [ ] A shared date input in `components/`: qualifier plus one or two partial dates
+- [ ] A shared date input in `components/`: a qualifier and separate year, month and day fields, with month and day optional and impossible days not offered
 - [ ] The person form edits birth and death through their life events
 - [ ] The marriage form can link the spouse to a person in the case, and has a "Marriage ended in divorce" section
 - [ ] Wording: "Root Ancestor", "Registration date", and the "As recorded in document" heading
-- [ ] Qualified dates are displayed in words, such as "about 1890"
+- [ ] Every date is displayed in words, day first: "4 March 1890", "March 1890", "about 1890"
 
 ---
 

@@ -50,11 +50,19 @@ func (s *Service) SetDocumentMover(documents DocumentMover) {
 	s.documents = documents
 }
 
-func (s *Service) ListLifeEvents(ctx context.Context, caseID string, page, perPage int) ([]LifeEvent, int, error) {
+func (s *Service) ListLifeEvents(ctx context.Context, caseID string) ([]LifeEvent, error) {
 	if err := s.cases.RequireActive(ctx, caseID); err != nil {
-		return nil, 0, platform.MapNotFound(err, ErrNotFound)
+		return nil, platform.MapNotFound(err, ErrNotFound)
 	}
-	return s.store.ListLifeEvents(ctx, caseID, page, perPage)
+	return s.store.ListLifeEvents(ctx, caseID)
+}
+
+// DeletionImpact reports what deleting a life event would take with it.
+func (s *Service) DeletionImpact(ctx context.Context, caseID, eventID string) (*DeletionImpact, error) {
+	if _, err := s.store.RequireActive(ctx, caseID, eventID); err != nil {
+		return nil, err
+	}
+	return s.store.DeletionImpact(ctx, caseID, eventID)
 }
 
 // RequireActive returns the event's person, or an error wrapping
@@ -79,9 +87,21 @@ func (s *Service) CreateLifeEvent(ctx context.Context, caseID, personID, eventTy
 	return le, err
 }
 
+// UpdateLifeEvent changes a life event's details and, when PersonID is given,
+// moves it and its documents to another person.
 func (s *Service) UpdateLifeEvent(ctx context.Context, caseID, eventID string, input UpdateLifeEventInput) (*LifeEvent, error) {
 	var le *LifeEvent
 	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		if input.PersonID != nil {
+			if s.documents == nil {
+				return errors.New("lifeevents: document mover not set")
+			}
+			// Documents are locked before their event, the order every
+			// document write uses, so the two cannot deadlock.
+			if err := s.documents.LockEventDocuments(ctx, caseID, eventID); err != nil {
+				return err
+			}
+		}
 		if _, err := s.store.LockActive(ctx, caseID, eventID); err != nil {
 			return err
 		}
@@ -89,17 +109,38 @@ func (s *Service) UpdateLifeEvent(ctx context.Context, caseID, eventID string, i
 		if err != nil {
 			return err
 		}
+		if err := platform.CheckVersion(before.Version, input.Version); err != nil {
+			return err
+		}
+		moving := input.PersonID != nil && *input.PersonID != before.PersonID
+		if moving {
+			if err := s.people.RequireActive(ctx, caseID, *input.PersonID); err != nil {
+				return platform.MapNotFound(err, ErrNotFound)
+			}
+		}
 		if le, err = s.store.UpdateLifeEvent(ctx, caseID, eventID, input); err != nil {
 			return err
+		}
+		if moving {
+			if err := s.documents.MoveEventDocuments(ctx, caseID, eventID, *input.PersonID); err != nil {
+				return err
+			}
 		}
 		return s.rec.Record(ctx, caseID, "updated", eventID, activitylog.Diff(before.logFields(), le.logFields()))
 	})
 	return le, err
 }
 
-func (s *Service) DeleteLifeEvent(ctx context.Context, caseID, eventID string) error {
+func (s *Service) DeleteLifeEvent(ctx context.Context, caseID, eventID string, version int) error {
 	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
 		if _, err := s.store.LockActive(ctx, caseID, eventID); err != nil {
+			return err
+		}
+		before, err := s.store.Get(ctx, caseID, eventID)
+		if err != nil {
+			return err
+		}
+		if err := platform.CheckVersion(before.Version, version); err != nil {
 			return err
 		}
 		if err := s.store.DeleteLifeEvent(ctx, caseID, eventID); err != nil {
@@ -107,36 +148,6 @@ func (s *Service) DeleteLifeEvent(ctx context.Context, caseID, eventID string) e
 		}
 		return s.rec.Record(ctx, caseID, "deleted", eventID, nil)
 	})
-}
-
-func (s *Service) ReassignLifeEvent(ctx context.Context, caseID, eventID, personID string) (*LifeEvent, error) {
-	var le *LifeEvent
-	err := platform.WithTx(ctx, s.db, func(ctx context.Context) error {
-		if s.documents == nil {
-			return errors.New("lifeevents: document mover not set")
-		}
-		if err := s.documents.LockEventDocuments(ctx, caseID, eventID); err != nil {
-			return err
-		}
-		if _, err := s.store.LockActive(ctx, caseID, eventID); err != nil {
-			return err
-		}
-		if err := s.people.RequireActive(ctx, caseID, personID); err != nil {
-			return platform.MapNotFound(err, ErrNotFound)
-		}
-		before, err := s.store.Get(ctx, caseID, eventID)
-		if err != nil {
-			return err
-		}
-		if le, err = s.store.ReassignLifeEvent(ctx, caseID, eventID, personID); err != nil {
-			return err
-		}
-		if err := s.documents.MoveEventDocuments(ctx, caseID, eventID, personID); err != nil {
-			return err
-		}
-		return s.rec.Record(ctx, caseID, "updated", eventID, activitylog.Diff(before.logFields(), le.logFields()))
-	})
-	return le, err
 }
 
 // Restore takes a life event out of the trash. Called by the trash module.

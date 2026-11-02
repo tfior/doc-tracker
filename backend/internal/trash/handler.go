@@ -42,7 +42,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 func (h *Handler) getGlobalTrash(w http.ResponseWriter, r *http.Request) {
 	t, err := h.svc.GetGlobalTrash(r.Context())
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		platform.ServerError(w, r, err)
 		return
 	}
 	platform.JSON(w, http.StatusOK, t)
@@ -52,7 +52,7 @@ func (h *Handler) getCaseTrash(w http.ResponseWriter, r *http.Request) {
 	caseID := r.PathValue("caseId")
 	t, err := h.svc.GetCaseTrash(r.Context(), caseID)
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		platform.ServerError(w, r, err)
 		return
 	}
 	platform.JSON(w, http.StatusOK, t)
@@ -108,7 +108,7 @@ func (h *Handler) permanentDeleteClaimLine(w http.ResponseWriter, r *http.Reques
 	h.handlePermanentDelete(w, r, func() error { return h.svc.PermanentDeleteClaimLine(r.Context(), caseID, lineID) })
 }
 
-func (h *Handler) handleRestore(w http.ResponseWriter, _ *http.Request, fn func() error) {
+func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request, fn func() error) {
 	if err := fn(); err != nil {
 		if platform.WriteError(w, err) {
 			return
@@ -117,13 +117,13 @@ func (h *Handler) handleRestore(w http.ResponseWriter, _ *http.Request, fn func(
 			platform.Error(w, http.StatusNotFound, "not_found", "Entity not found in trash")
 			return
 		}
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		platform.ServerError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) handlePermanentDelete(w http.ResponseWriter, _ *http.Request, fn func() error) {
+func (h *Handler) handlePermanentDelete(w http.ResponseWriter, r *http.Request, fn func() error) {
 	if err := fn(); err != nil {
 		if platform.WriteError(w, err) {
 			return
@@ -132,7 +132,7 @@ func (h *Handler) handlePermanentDelete(w http.ResponseWriter, _ *http.Request, 
 			platform.Error(w, http.StatusNotFound, "not_found", "Entity not found in trash")
 			return
 		}
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		platform.ServerError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -99,8 +99,8 @@ func TestActivityLog_OneEntryPerWrite(t *testing.T) {
 			entityType: "case",
 			run: func(t *testing.T, e *env) (string, string) {
 				id := e.createCase(t)
-				require.Equal(t, http.StatusOK, e.c.Do("PATCH", "/api/v1/cases/"+id, map[string]any{"title": "Renamed"}).Code)
-				require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", "/api/v1/cases/"+id, nil).Code)
+				require.Equal(t, http.StatusOK, e.c.DoV("PATCH", "/api/v1/cases/"+id, map[string]any{"title": "Renamed"}).Code)
+				require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", "/api/v1/cases/"+id, nil).Code)
 				return id, id
 			},
 			want: []string{"created", "updated", "deleted"},
@@ -111,8 +111,8 @@ func TestActivityLog_OneEntryPerWrite(t *testing.T) {
 				caseID := e.createCase(t)
 				id := e.createPerson(t, caseID, "Giuseppe")
 				p := "/api/v1/cases/" + caseID + "/people/" + id
-				require.Equal(t, http.StatusOK, e.c.Do("PATCH", p, map[string]any{"first_name": "Joseph"}).Code)
-				require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", p, nil).Code)
+				require.Equal(t, http.StatusOK, e.c.DoV("PATCH", p, map[string]any{"first_name": "Joseph"}).Code)
+				require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", p, nil).Code)
 				return caseID, id
 			},
 			want: []string{"created", "updated", "deleted"},
@@ -123,9 +123,9 @@ func TestActivityLog_OneEntryPerWrite(t *testing.T) {
 				caseID := e.createCase(t)
 				child := e.createPerson(t, caseID, "Antonio")
 				parent := e.createPerson(t, caseID, "Giuseppe")
-				p := "/api/v1/cases/" + caseID + "/people/" + child + "/relationships"
-				require.Equal(t, http.StatusCreated, e.c.Do("POST", p, map[string]any{"parent_id": parent}).Code)
-				require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", p+"/"+parent, nil).Code)
+				p := "/api/v1/cases/" + caseID + "/people/" + child
+				require.Equal(t, http.StatusOK, e.c.DoV("PATCH", p, map[string]any{"parent_ids": []string{parent}}).Code)
+				require.Equal(t, http.StatusOK, e.c.DoV("PATCH", p, map[string]any{"parent_ids": []string{}}).Code)
 				return caseID, child
 			},
 			want: []string{"created", "deleted"},
@@ -138,8 +138,8 @@ func TestActivityLog_OneEntryPerWrite(t *testing.T) {
 				id := e.c.MustCreate(t, "/api/v1/cases/"+caseID+"/life-events",
 					map[string]any{"person_id": person, "event_type": "birth"})
 				p := "/api/v1/cases/" + caseID + "/life-events/" + id
-				require.Equal(t, http.StatusOK, e.c.Do("PATCH", p, map[string]any{"event_place": "Palermo"}).Code)
-				require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", p, nil).Code)
+				require.Equal(t, http.StatusOK, e.c.DoV("PATCH", p, map[string]any{"event_place": "Palermo"}).Code)
+				require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", p, nil).Code)
 				return caseID, id
 			},
 			want: []string{"created", "updated", "deleted"},
@@ -152,8 +152,8 @@ func TestActivityLog_OneEntryPerWrite(t *testing.T) {
 				id := e.c.MustCreate(t, "/api/v1/cases/"+caseID+"/documents",
 					map[string]any{"person_id": person, "document_type": "birth_certificate", "title": "Birth certificate"})
 				p := "/api/v1/cases/" + caseID + "/documents/" + id
-				require.Equal(t, http.StatusOK, e.c.Do("PATCH", p, map[string]any{"title": "Italian birth certificate"}).Code)
-				require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", p, nil).Code)
+				require.Equal(t, http.StatusOK, e.c.DoV("PATCH", p, map[string]any{"title": "Italian birth certificate"}).Code)
+				require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", p, nil).Code)
 				return caseID, id
 			},
 			want: []string{"created", "updated", "deleted"},
@@ -166,8 +166,8 @@ func TestActivityLog_OneEntryPerWrite(t *testing.T) {
 				id := e.c.MustCreate(t, "/api/v1/cases/"+caseID+"/claim-lines",
 					map[string]any{"root_person_id": root})
 				p := "/api/v1/cases/" + caseID + "/claim-lines/" + id
-				require.Equal(t, http.StatusOK, e.c.Do("PATCH", p, map[string]any{"status": "researching"}).Code)
-				require.Equal(t, http.StatusNoContent, e.c.Do("DELETE", p, nil).Code)
+				require.Equal(t, http.StatusOK, e.c.DoV("PATCH", p, map[string]any{"status": "researching"}).Code)
+				require.Equal(t, http.StatusNoContent, e.c.DoV("DELETE", p, nil).Code)
 				return caseID, id
 			},
 			want: []string{"created", "updated", "deleted"},
@@ -192,7 +192,7 @@ func TestActivityLog_NoEntryWhenWriteFails(t *testing.T) {
 	before := testhelpers.ActivityLog(t, e.db, caseID)
 
 	missing := "00000000-0000-0000-0000-000000000001"
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+caseID+"/people/"+missing, map[string]any{"first_name": "Nobody"})
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+caseID+"/people/"+missing, map[string]any{"first_name": "Nobody"})
 	require.Equal(t, http.StatusNotFound, rec.Code)
 
 	assert.Equal(t, before, testhelpers.ActivityLog(t, e.db, caseID))
@@ -219,7 +219,7 @@ func TestUpdatePerson_LogFails_NothingSaved(t *testing.T) {
 	personID := e.createPerson(t, caseID, "Giuseppe")
 	testhelpers.FailActivityLogWrites(t, e.db)
 
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+caseID+"/people/"+personID, map[string]any{"first_name": "Joseph"})
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+caseID+"/people/"+personID, map[string]any{"first_name": "Joseph"})
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	p := findByID(e.list(t, "/api/v1/cases/"+caseID+"/people"), personID)
@@ -233,7 +233,7 @@ func TestDeletePerson_LogFails_NothingSaved(t *testing.T) {
 	personID := e.createPerson(t, caseID, "Giuseppe")
 	testhelpers.FailActivityLogWrites(t, e.db)
 
-	rec := e.c.Do("DELETE", "/api/v1/cases/"+caseID+"/people/"+personID, nil)
+	rec := e.c.DoV("DELETE", "/api/v1/cases/"+caseID+"/people/"+personID, nil)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.NotNil(t, findByID(e.list(t, "/api/v1/cases/"+caseID+"/people"), personID),
@@ -254,7 +254,7 @@ func TestReassignDocument_LogFails_NothingSaved(t *testing.T) {
 		map[string]any{"person_id": personA, "document_type": "birth_certificate", "title": "Birth certificate"})
 	testhelpers.FailActivityLogWrites(t, e.db)
 
-	rec := e.c.Do("PATCH", "/api/v1/cases/"+caseID+"/documents/"+docID+"/parent",
+	rec := e.c.DoV("PATCH", "/api/v1/cases/"+caseID+"/documents/"+docID,
 		map[string]any{"person_id": personB, "life_event_id": eventB})
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)

@@ -49,7 +49,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		platform.Error(w, http.StatusInternalServerError, "internal", "unexpected error")
+		platform.ServerError(w, r, err)
 		return
 	}
 
