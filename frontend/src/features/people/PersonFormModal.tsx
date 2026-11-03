@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal, Stack, Loader } from '@mantine/core';
 import { createPerson, updatePerson, type Person } from '../../api/people';
@@ -45,8 +45,12 @@ function PersonFormBody({ caseId, record, onClose, people }: PersonFormModalProp
   // with the version read alongside them. A family link changed elsewhere since
   // raises this person's version too, so the save is refused rather than
   // silently undoing it (domain model, rule 7).
-  const [base, setBase] = useState(() => ({ person: record, initial: personFormValues(record, people) }));
+  const [base, setBase] = useState(() => {
+    const initial = personFormValues(record, people);
+    return { person: record, initial, start: initial };
+  });
   const person = base.person;
+  const edited = useRef<PersonFormValues | null>(null);
 
   const save = useMutation({
     mutationFn: async (values: PersonFormValues) => {
@@ -65,15 +69,38 @@ function PersonFormBody({ caseId, record, onClose, people }: PersonFormModalProp
     const { items } = await queryClient.fetchQuery({ ...peopleQuery(caseId), staleTime: 0 });
     const fresh = items.find((p) => p.id === person!.id);
     save.reset();
-    if (fresh) setBase({ person: fresh, initial: personFormValues(fresh, items) });
-    else onClose();
+    if (fresh) {
+      const initial = personFormValues(fresh, items);
+      edited.current = null;
+      setBase({ person: fresh, initial, start: initial });
+    } else onClose();
+  }
+
+  // A birth or death event changed from inside this modal is part of the
+  // person, so it raises their version (domain model, rule 7). The modal takes
+  // the new version and values, keeping any field the user has edited but not
+  // yet saved, so their next save is not refused for a change they made here.
+  async function eventChanged() {
+    const { items } = await queryClient.fetchQuery({ ...peopleQuery(caseId), staleTime: 0 });
+    const fresh = items.find((p) => p.id === person!.id);
+    if (!fresh || fresh.version === person!.version) return;
+    const initial = personFormValues(fresh, items);
+    const current = edited.current ?? base.initial;
+    const start = { ...initial };
+    for (const key of Object.keys(initial) as (keyof PersonFormValues)[]) {
+      if (JSON.stringify(current[key]) !== JSON.stringify(base.initial[key])) {
+        (start as Record<string, unknown>)[key] = current[key];
+      }
+    }
+    edited.current = start;
+    setBase({ person: fresh, initial, start });
   }
 
   return (
     <Stack>
       <PersonForm
         key={person?.version ?? 'new'}
-        initial={base.initial}
+        initial={base.start}
         isNew={!person}
         others={people.filter((p) => p.id !== person?.id)}
         saving={save.isPending}
@@ -81,6 +108,7 @@ function PersonFormBody({ caseId, record, onClose, people }: PersonFormModalProp
         onSubmit={(values) => save.mutate(values)}
         onCancel={onClose}
         onReload={reload}
+        onEdit={(values) => { edited.current = values; }}
       />
       {person && (
         <>
@@ -88,6 +116,7 @@ function PersonFormBody({ caseId, record, onClose, people }: PersonFormModalProp
             caseId={caseId}
             personId={person.id}
             lifeEvents={lifeEvents.filter((le) => le.person_id === person.id)}
+            onChanged={eventChanged}
           />
           <DocumentListSection
             caseId={caseId}

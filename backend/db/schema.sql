@@ -193,9 +193,6 @@ CREATE TABLE public.people (
     case_id uuid NOT NULL,
     first_name text NOT NULL,
     last_name text NOT NULL,
-    birth_date date,
-    birth_place text,
-    death_date date,
     notes text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -634,6 +631,13 @@ CREATE INDEX life_events_case_id_idx ON public.life_events USING btree (case_id)
 --
 
 CREATE INDEX life_events_deleted_at_idx ON public.life_events USING btree (deleted_at) WHERE (deleted_at IS NOT NULL);
+
+
+--
+-- Name: life_events_one_birth_one_death; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX life_events_one_birth_one_death ON public.life_events USING btree (person_id, event_type) WHERE ((event_type = ANY (ARRAY['birth'::public.life_event_type, 'death'::public.life_event_type])) AND (deleted_at IS NULL));
 
 
 --

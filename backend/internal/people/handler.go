@@ -41,14 +41,15 @@ func respondError(w http.ResponseWriter, r *http.Request, err error, notFound st
 
 // personFields is the body shared by create and update.
 type personFields struct {
-	FirstName  *string             `json:"first_name"`
-	LastName   *string             `json:"last_name"`
-	BirthDate  platform.NullString `json:"birth_date"`
-	BirthPlace platform.NullString `json:"birth_place"`
-	DeathDate  platform.NullString `json:"death_date"`
-	Notes      platform.NullString `json:"notes"`
-	ParentIDs  *[]string           `json:"parent_ids"`
-	ChildIDs   *[]string           `json:"child_ids"`
+	FirstName  *string                    `json:"first_name"`
+	LastName   *string                    `json:"last_name"`
+	BirthDate  platform.NullQualifiedDate `json:"birth_date"`
+	BirthPlace platform.NullString        `json:"birth_place"`
+	DeathDate  platform.NullQualifiedDate `json:"death_date"`
+	DeathPlace platform.NullString        `json:"death_place"`
+	Notes      platform.NullString        `json:"notes"`
+	ParentIDs  *[]string                  `json:"parent_ids"`
+	ChildIDs   *[]string                  `json:"child_ids"`
 }
 
 func (f *personFields) validate(v *platform.Validator) {
@@ -56,8 +57,8 @@ func (f *personFields) validate(v *platform.Validator) {
 	platform.Trim(f.LastName)
 	v.NotBlank("first_name", f.FirstName)
 	v.NotBlank("last_name", f.LastName)
-	v.Date("birth_date", f.BirthDate)
-	v.Date("death_date", f.DeathDate)
+	v.QualifiedDate("birth_date", &f.BirthDate)
+	v.QualifiedDate("death_date", &f.DeathDate)
 	if f.ParentIDs != nil {
 		v.IDs("parent_ids", *f.ParentIDs)
 	}
@@ -69,7 +70,8 @@ func (f *personFields) validate(v *platform.Validator) {
 func (f *personFields) input() UpdatePersonInput {
 	return UpdatePersonInput{
 		FirstName: f.FirstName, LastName: f.LastName,
-		BirthDate: f.BirthDate, BirthPlace: f.BirthPlace, DeathDate: f.DeathDate, Notes: f.Notes,
+		BirthDate: f.BirthDate, BirthPlace: f.BirthPlace, DeathDate: f.DeathDate, DeathPlace: f.DeathPlace,
+		Notes:     f.Notes,
 		ParentIDs: f.ParentIDs, ChildIDs: f.ChildIDs,
 	}
 }

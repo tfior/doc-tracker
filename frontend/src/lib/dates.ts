@@ -8,20 +8,6 @@ import type { DateQualifier, QualifiedDate } from '../api/dates';
 // formatting of dates for display. The server has the final say on what is
 // valid (architecture.md, Division of Responsibility).
 
-const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-export const DATE_FORMAT_MESSAGE = 'Enter a real date in the form YYYY-MM-DD, for example 1890-03-15.';
-
-/** Returns a message if value is neither empty nor a real date in the form YYYY-MM-DD. */
-export function dateFormatError(value: string): string | null {
-  const v = value.trim();
-  if (v === '') return null;
-  const m = DATE_PATTERN.exec(v);
-  if (!m) return DATE_FORMAT_MESSAGE;
-  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  return day <= daysInMonth(year, month) && month >= 1 && month <= 12 && day >= 1 ? null : DATE_FORMAT_MESSAGE;
-}
-
 export const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',

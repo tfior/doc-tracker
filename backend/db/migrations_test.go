@@ -130,3 +130,96 @@ func TestMigration_DatesCarriedForward(t *testing.T) {
 	assert.Equal(t, "1902-06-12", registration)
 	assert.Equal(t, "0890-01-01", recordedBirth, "early years keep four digits")
 }
+
+// Scenario 13 (birth and death): a person's own birth and death fields move
+// to their birth and death life events. An event's own value is kept when the
+// two disagree, and the person's goes into the event's notes, so nothing is
+// lost. The person's columns are then removed.
+func TestMigration_BirthAndDeathMoveToEvents(t *testing.T) {
+	db, m := migrateTo(t, 11)
+
+	var caseID string
+	require.NoError(t, db.QueryRow(`INSERT INTO cases (title) VALUES ('Rossi') RETURNING id`).Scan(&caseID))
+	person := func(name, birthDate, birthPlace, deathDate any) string {
+		var id string
+		require.NoError(t, db.QueryRow(`
+			INSERT INTO people (case_id, first_name, last_name, birth_date, birth_place, death_date)
+			VALUES ($1, $2, 'Rossi', $3, $4, $5) RETURNING id`,
+			caseID, name, birthDate, birthPlace, deathDate).Scan(&id))
+		return id
+	}
+	event := func(personID, eventType string, date, qualifier, place, notes any) {
+		_, err := db.Exec(`
+			INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place, notes)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			caseID, personID, eventType, date, qualifier, place, notes)
+		require.NoError(t, err)
+	}
+
+	noEvent := person("NoEvent", "1875-03-15", "Palermo", "1952-11-03")
+	emptyEvent := person("EmptyEvent", "1880-01-31", "Naples", nil)
+	event(emptyEvent, "birth", nil, nil, nil, "Baptised a week later")
+	disagree := person("Disagree", "1890-03-15", "Rome", nil)
+	event(disagree, "birth", "1890", "about", "Roma", nil)
+	nothing := person("Nothing", nil, nil, nil)
+
+	up(t, m)
+
+	type ev struct {
+		date, qualifier, place, notes sql.NullString
+	}
+	get := func(personID, eventType string) []ev {
+		rows, err := db.Query(`
+			SELECT event_date, event_date_qualifier::text, event_place, notes
+			FROM life_events WHERE person_id = $1 AND event_type = $2 AND deleted_at IS NULL`, personID, eventType)
+		require.NoError(t, err)
+		defer rows.Close()
+		var out []ev
+		for rows.Next() {
+			var e ev
+			require.NoError(t, rows.Scan(&e.date, &e.qualifier, &e.place, &e.notes))
+			out = append(out, e)
+		}
+		return out
+	}
+	str := func(s string) sql.NullString { return sql.NullString{String: s, Valid: true} }
+
+	assert.Equal(t, []ev{{date: str("1875-03-15"), qualifier: str("exact"), place: str("Palermo")}},
+		get(noEvent, "birth"), "a birth event is created")
+	assert.Equal(t, []ev{{date: str("1952-11-03"), qualifier: str("exact")}},
+		get(noEvent, "death"), "a death event is created")
+	assert.Equal(t, []ev{{date: str("1880-01-31"), qualifier: str("exact"), place: str("Naples"), notes: str("Baptised a week later")}},
+		get(emptyEvent, "birth"), "the existing event's empty fields are filled")
+	assert.Equal(t, []ev{{date: str("1890"), qualifier: str("about"), place: str("Roma"),
+		notes: str("Birth date on the person record: 1890-03-15\nBirth place on the person record: Rome")}},
+		get(disagree, "birth"), "the event keeps its own values; the person's go into its notes")
+	assert.Empty(t, get(nothing, "birth"), "no fields, so no event")
+	assert.Empty(t, get(nothing, "death"))
+
+	var columns int
+	require.NoError(t, db.QueryRow(`
+		SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_name = 'people' AND column_name IN ('birth_date', 'birth_place', 'death_date')`).Scan(&columns))
+	assert.Zero(t, columns, "the person's own columns are removed")
+}
+
+// Scenario 13, continued: a person with two active birth events cannot be
+// migrated, because which one is theirs is a judgement. The migration stops
+// and names them.
+func TestMigration_TwoBirthEventsStop(t *testing.T) {
+	db, m := migrateTo(t, 11)
+
+	var caseID, personID string
+	require.NoError(t, db.QueryRow(`INSERT INTO cases (title) VALUES ('Rossi') RETURNING id`).Scan(&caseID))
+	require.NoError(t, db.QueryRow(
+		`INSERT INTO people (case_id, first_name, last_name) VALUES ($1, 'Giuseppe', 'Rossi') RETURNING id`,
+		caseID).Scan(&personID))
+	for range 2 {
+		_, err := db.Exec(`INSERT INTO life_events (case_id, person_id, event_type) VALUES ($1, $2, 'birth')`, caseID, personID)
+		require.NoError(t, err)
+	}
+
+	err := m.Up()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Giuseppe Rossi")
+}

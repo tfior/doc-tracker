@@ -5,6 +5,7 @@
 import { Table, Text, Button, Group, Badge } from '@mantine/core';
 import type { Person } from '../../api/people';
 import { fullName } from './personName';
+import { formatQualifiedDate } from '../../lib/dates';
 
 interface PeopleTableProps {
   people: Person[];
@@ -36,9 +37,9 @@ export default function PeopleTable({ people, onEdit, onDelete }: PeopleTablePro
           return (
             <Table.Tr key={p.id} onClick={() => onEdit(p)} style={{ cursor: 'pointer' }}>
               <Table.Td>{fullName(p)}</Table.Td>
-              <Table.Td>{p.birth_date ?? '—'}</Table.Td>
+              <Table.Td>{p.birth_date ? formatQualifiedDate(p.birth_date) : '—'}</Table.Td>
               <Table.Td>{p.birth_place ?? '—'}</Table.Td>
-              <Table.Td>{p.death_date ?? '—'}</Table.Td>
+              <Table.Td>{p.death_date ? formatQualifiedDate(p.death_date) : '—'}</Table.Td>
               <Table.Td>
                 {parents.length === 0 ? (
                   <Text size="sm" c="dimmed">—</Text>

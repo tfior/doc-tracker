@@ -127,24 +127,24 @@ func seed(db *sql.DB) error {
 	// -------------------------------------------------------------------------
 
 	giuseppeID := s.id(`
-		INSERT INTO people (case_id, first_name, last_name, birth_date, birth_place, death_date)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text`,
-		caseID, "Giuseppe", "Rossi", "1875-03-15", "Palermo, Sicily, Italy", "1952-11-03")
+		INSERT INTO people (case_id, first_name, last_name)
+		VALUES ($1, $2, $3) RETURNING id::text`,
+		caseID, "Giuseppe", "Rossi")
 
 	antonioID := s.id(`
-		INSERT INTO people (case_id, first_name, last_name, birth_date, birth_place, death_date)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text`,
-		caseID, "Antonio", "Rossi", "1905-09-22", "New York, NY", "1978-05-20")
+		INSERT INTO people (case_id, first_name, last_name)
+		VALUES ($1, $2, $3) RETURNING id::text`,
+		caseID, "Antonio", "Rossi")
 
 	carloID := s.id(`
-		INSERT INTO people (case_id, first_name, last_name, birth_date, birth_place, death_date)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text`,
-		caseID, "Carlo", "Rossi", "1932-08-11", "Brooklyn, NY", "2015-02-27")
+		INSERT INTO people (case_id, first_name, last_name)
+		VALUES ($1, $2, $3) RETURNING id::text`,
+		caseID, "Carlo", "Rossi")
 
 	sofiaID := s.id(`
-		INSERT INTO people (case_id, first_name, last_name, birth_date, birth_place)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
-		caseID, "Sofia", "Martini", "1962-03-08", "Queens, NY")
+		INSERT INTO people (case_id, first_name, last_name)
+		VALUES ($1, $2, $3) RETURNING id::text`,
+		caseID, "Sofia", "Martini")
 
 	// -------------------------------------------------------------------------
 	// PersonRelationships (parent-child lineage)

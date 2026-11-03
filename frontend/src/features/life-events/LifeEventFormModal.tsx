@@ -22,6 +22,8 @@ interface LifeEventFormModalProps {
   onClose: () => void;
   /** When set, the person field is hidden and a new event belongs to this person. */
   lockedPersonId?: string;
+  /** Called after a save. */
+  onSaved?: () => void;
 }
 
 export default function LifeEventFormModal(props: LifeEventFormModalProps) {
@@ -40,7 +42,7 @@ export default function LifeEventFormModal(props: LifeEventFormModalProps) {
 
 // The modal's content is unmounted when it closes, so each opening starts from
 // the record as it was when opened, and saves against that version.
-function LifeEventFormBody({ caseId, record, onClose, lockedPersonId }: LifeEventFormModalProps) {
+function LifeEventFormBody({ caseId, record, onClose, lockedPersonId, onSaved }: LifeEventFormModalProps) {
   const queryClient = useQueryClient();
   const people = useQuery(peopleQuery(caseId)).data?.items ?? [];
   const documents = useQuery(documentsQuery(caseId)).data?.items ?? [];
@@ -55,6 +57,7 @@ function LifeEventFormBody({ caseId, record, onClose, lockedPersonId }: LifeEven
     },
     onSuccess: () => {
       invalidateCase(queryClient, caseId);
+      onSaved?.();
       onClose();
     },
   });

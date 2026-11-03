@@ -12,18 +12,20 @@ import (
 )
 
 type Person struct {
-	ID         string    `json:"id"`
-	CaseID     string    `json:"case_id"`
-	FirstName  string    `json:"first_name"`
-	LastName   string    `json:"last_name"`
-	BirthDate  *string   `json:"birth_date"`
-	BirthPlace *string   `json:"birth_place"`
-	DeathDate  *string   `json:"death_date"`
-	Notes      *string   `json:"notes"`
-	ParentIDs  []string  `json:"parent_ids"`
-	Version    int       `json:"version"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID        string `json:"id"`
+	CaseID    string `json:"case_id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	// Birth and death are read from the person's birth and death life events.
+	BirthDate  *platform.QualifiedDate `json:"birth_date"`
+	BirthPlace *string                 `json:"birth_place"`
+	DeathDate  *platform.QualifiedDate `json:"death_date"`
+	DeathPlace *string                 `json:"death_place"`
+	Notes      *string                 `json:"notes"`
+	ParentIDs  []string                `json:"parent_ids"`
+	Version    int                     `json:"version"`
+	CreatedAt  time.Time               `json:"created_at"`
+	UpdatedAt  time.Time               `json:"updated_at"`
 }
 
 type Relationship struct {
@@ -33,12 +35,14 @@ type Relationship struct {
 }
 
 type UpdatePersonInput struct {
-	Version    int // the version the change is based on; unused on create
-	FirstName  *string
-	LastName   *string
-	BirthDate  platform.NullString
+	Version   int // the version the change is based on; unused on create
+	FirstName *string
+	LastName  *string
+	// Birth and death are written to the person's birth and death life events.
+	BirthDate  platform.NullQualifiedDate
 	BirthPlace platform.NullString
-	DeathDate  platform.NullString
+	DeathDate  platform.NullQualifiedDate
+	DeathPlace platform.NullString
 	Notes      platform.NullString
 	// ParentIDs and ChildIDs, when supplied, are the person's complete lists of
 	// active parents and children; links not listed are removed.
@@ -53,14 +57,12 @@ type DeletionImpact struct {
 	ClaimLines int `json:"claim_lines"`
 }
 
-// logFields is what the activity log compares when a person changes.
+// logFields is what the activity log compares when a person changes. Birth
+// and death are logged against their life events, not here.
 func (p *Person) logFields() activitylog.Fields {
 	return activitylog.Fields{
-		"first_name":  p.FirstName,
-		"last_name":   p.LastName,
-		"birth_date":  activitylog.Value(p.BirthDate),
-		"birth_place": activitylog.Value(p.BirthPlace),
-		"death_date":  activitylog.Value(p.DeathDate),
-		"notes":       activitylog.Value(p.Notes),
+		"first_name": p.FirstName,
+		"last_name":  p.LastName,
+		"notes":      activitylog.Value(p.Notes),
 	}
 }

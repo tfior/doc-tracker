@@ -28,7 +28,9 @@ type Store interface {
 	UpdateLifeEvent(ctx context.Context, caseID, eventID string, input UpdateLifeEventInput) (*LifeEvent, error)
 	DeleteLifeEvent(ctx context.Context, caseID, eventID string) error
 	RequireActive(ctx context.Context, caseID, eventID string) (personID string, err error)
-	TrashedPersonID(ctx context.Context, caseID, eventID string) (string, error)
+	Peek(ctx context.Context, caseID, eventID string) (personID, eventType string, trashed bool, err error)
+	VitalEvent(ctx context.Context, caseID, personID, eventType string) (string, error)
+	VitalHolder(ctx context.Context, caseID, personID, eventType, exceptID string) (string, error)
 	Restore(ctx context.Context, caseID, id string) error
 	PermanentDelete(ctx context.Context, caseID, id string) error
 }
@@ -270,21 +272,63 @@ func (s *store) RequireActive(ctx context.Context, caseID, eventID string) (stri
 	return personID, nil
 }
 
-// TrashedPersonID returns the person of a life event that is in the trash, or
-// ErrNotFound if the event is not in the trash.
-func (s *store) TrashedPersonID(ctx context.Context, caseID, eventID string) (string, error) {
-	var personID string
+// Peek returns a life event's person and type, and whether it is in the
+// trash, without locking it. It tells a write which people to lock before the
+// event itself.
+func (s *store) Peek(ctx context.Context, caseID, eventID string) (string, string, bool, error) {
+	var personID, eventType string
+	var trashed bool
 	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT person_id::text FROM life_events WHERE id = $1 AND case_id = $2 AND deleted_at IS NOT NULL`,
+		`SELECT person_id::text, event_type::text, deleted_at IS NOT NULL FROM life_events WHERE id = $1 AND case_id = $2`,
 		eventID, caseID,
-	).Scan(&personID)
+	).Scan(&personID, &eventType, &trashed)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+		return "", "", false, ErrNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("get trashed life event: %w", err)
+		return "", "", false, fmt.Errorf("peek life event: %w", err)
 	}
-	return personID, nil
+	return personID, eventType, trashed, nil
+}
+
+// VitalEvent locks and returns the ID of the person's birth or death event
+// that is not in the trash, or "" if they have none.
+func (s *store) VitalEvent(ctx context.Context, caseID, personID, eventType string) (string, error) {
+	var id string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT id::text FROM life_events
+		WHERE case_id = $1 AND person_id = $2 AND event_type = $3::life_event_type AND deleted_at IS NULL
+		FOR NO KEY UPDATE`,
+		caseID, personID, eventType,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("vital event: %w", err)
+	}
+	return id, nil
+}
+
+// VitalHolder returns the person's name if they already have a birth or death
+// event, other than exceptID, that is not in the trash; otherwise "".
+func (s *store) VitalHolder(ctx context.Context, caseID, personID, eventType, exceptID string) (string, error) {
+	var name string
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT p.first_name || ' ' || p.last_name
+		FROM life_events le JOIN people p ON p.id = le.person_id
+		WHERE le.case_id = $1 AND le.person_id = $2 AND le.event_type = $3::life_event_type
+		  AND le.deleted_at IS NULL AND le.id::text <> $4
+		LIMIT 1`,
+		caseID, personID, eventType, exceptID,
+	).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("vital holder: %w", err)
+	}
+	return name, nil
 }
 
 func (s *store) Restore(ctx context.Context, caseID, id string) error {

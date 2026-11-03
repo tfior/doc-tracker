@@ -40,6 +40,7 @@ func NewHandler(db *sql.DB) http.Handler {
 	lifeEventsSvc := lifeevents.NewService(lifeevents.NewStore(db), db, actlogSvc, casesSvc, peopleSvc)
 	documentsSvc := documents.NewService(documents.NewStore(db), db, actlogSvc, casesSvc, peopleSvc, lifeEventsSvc)
 	lifeEventsSvc.SetDocumentMover(documentsSvc)
+	peopleSvc.SetVitalEvents(lifeEventsSvc)
 	claimLinesSvc := claimlines.NewService(claimlines.NewStore(db), db, actlogSvc, casesSvc, peopleSvc)
 	trashSvc := trash.NewService(trash.NewStore(db), db, trash.Owners{
 		Cases:      casesSvc,

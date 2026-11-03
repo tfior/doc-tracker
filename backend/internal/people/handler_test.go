@@ -16,6 +16,7 @@ import (
 	"github.com/tfior/doc-tracker/internal/cases"
 	"github.com/tfior/doc-tracker/internal/people"
 	"github.com/tfior/doc-tracker/internal/testhelpers"
+	"github.com/tfior/doc-tracker/platform"
 )
 
 type testEnv struct {
@@ -91,9 +92,9 @@ func TestCreatePerson_WithOptionalFields(t *testing.T) {
 	rec := env.do("POST", "/api/v1/cases/"+c.ID+"/people", map[string]any{
 		"first_name":  "Antonio",
 		"last_name":   "Rossi",
-		"birth_date":  "1890-03-15",
+		"birth_date":  map[string]any{"value": "1890-03-15", "qualifier": "exact"},
 		"birth_place": "Rome, Italy",
-		"death_date":  "1955-11-01",
+		"death_date":  map[string]any{"value": "1955-11", "qualifier": "about"},
 		"notes":       "LIRA candidate",
 	})
 
@@ -101,11 +102,11 @@ func TestCreatePerson_WithOptionalFields(t *testing.T) {
 	var got people.Person
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
 	require.NotNil(t, got.BirthDate)
-	assert.Equal(t, "1890-03-15", *got.BirthDate)
+	assert.Equal(t, platform.QualifiedDate{Value: "1890-03-15", Qualifier: "exact"}, *got.BirthDate)
 	require.NotNil(t, got.BirthPlace)
 	assert.Equal(t, "Rome, Italy", *got.BirthPlace)
 	require.NotNil(t, got.DeathDate)
-	assert.Equal(t, "1955-11-01", *got.DeathDate)
+	assert.Equal(t, platform.QualifiedDate{Value: "1955-11", Qualifier: "about"}, *got.DeathDate)
 	require.NotNil(t, got.Notes)
 	assert.Equal(t, "LIRA candidate", *got.Notes)
 }
@@ -170,7 +171,7 @@ func TestUpdatePerson_OptionalFields(t *testing.T) {
 	p := env.createPerson(t, c.ID, "Giuseppe", "Rossi")
 
 	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/people/"+p.ID, map[string]any{
-		"birth_date":  "1880-06-01",
+		"birth_date":  map[string]any{"value": "1880-06-01", "qualifier": "exact"},
 		"birth_place": "Naples, Italy",
 	})
 
@@ -178,7 +179,7 @@ func TestUpdatePerson_OptionalFields(t *testing.T) {
 	var got people.Person
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
 	require.NotNil(t, got.BirthDate)
-	assert.Equal(t, "1880-06-01", *got.BirthDate)
+	assert.Equal(t, platform.QualifiedDate{Value: "1880-06-01", Qualifier: "exact"}, *got.BirthDate)
 	require.NotNil(t, got.BirthPlace)
 	assert.Equal(t, "Naples, Italy", *got.BirthPlace)
 }
@@ -191,7 +192,7 @@ func TestUpdatePerson_ClearOptionalField(t *testing.T) {
 	rec := env.do("POST", "/api/v1/cases/"+c.ID+"/people", map[string]any{
 		"first_name": "Giuseppe",
 		"last_name":  "Rossi",
-		"birth_date": "1880-06-01",
+		"birth_date": map[string]any{"value": "1880-06-01", "qualifier": "exact"},
 	})
 	require.Equal(t, http.StatusCreated, rec.Code)
 	var p people.Person

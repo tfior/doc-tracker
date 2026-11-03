@@ -56,16 +56,10 @@ func NewStore(db *sql.DB) Store {
 
 func (s *store) ListPeople(ctx context.Context, caseID string) ([]Person, error) {
 	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
-		SELECT
-			id::text, case_id::text,
-			first_name, last_name,
-			birth_date::text, birth_place,
-			death_date::text, notes,
-			version, created_at, updated_at,
-			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN active_people pa ON pa.id = pr.parent_id WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
-		FROM people
-		WHERE id IN (SELECT id FROM active_people WHERE case_id = $1)
-		ORDER BY birth_date ASC NULLS LAST, created_at ASC, id ASC`,
+		SELECT `+personColumns+`
+		FROM `+personTables+`
+		WHERE people.id IN (SELECT id FROM active_people WHERE case_id = $1)
+		ORDER BY birth.event_date COLLATE "C" ASC NULLS LAST, people.created_at ASC, people.id ASC`,
 		caseID)
 	if err != nil {
 		return nil, fmt.Errorf("query people: %w", err)
@@ -74,22 +68,11 @@ func (s *store) ListPeople(ctx context.Context, caseID string) ([]Person, error)
 
 	items := []Person{}
 	for rows.Next() {
-		var p Person
-		var birthDate, birthPlace, deathDate, notes sql.NullString
-		var parentIDs pq.StringArray
-		if err := rows.Scan(
-			&p.ID, &p.CaseID,
-			&p.FirstName, &p.LastName,
-			&birthDate, &birthPlace,
-			&deathDate, &notes,
-			&p.Version, &p.CreatedAt, &p.UpdatedAt,
-			&parentIDs,
-		); err != nil {
+		p, err := scanPerson(rows.Scan)
+		if err != nil {
 			return nil, fmt.Errorf("scan person: %w", err)
 		}
-		assignNullable(&p, birthDate, birthPlace, deathDate, notes)
-		p.ParentIDs = toStringSlice(parentIDs)
-		items = append(items, p)
+		items = append(items, *p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate people: %w", err)
@@ -101,13 +84,10 @@ func (s *store) ListPeople(ctx context.Context, caseID string) ([]Person, error)
 func (s *store) CreatePerson(ctx context.Context, caseID, firstName, lastName string, input UpdatePersonInput) (*Person, error) {
 	var id string
 	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
-		INSERT INTO people (case_id, first_name, last_name, birth_date, birth_place, death_date, notes)
-		VALUES ($1, $2, $3, $4::date, $5, $6::date, $7)
+		INSERT INTO people (case_id, first_name, last_name, notes)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id::text`,
 		caseID, firstName, lastName,
-		nullableToSQL(input.BirthDate),
-		nullableToSQL(input.BirthPlace),
-		nullableToSQL(input.DeathDate),
 		nullableToSQL(input.Notes),
 	).Scan(&id)
 	if err != nil {
@@ -122,20 +102,14 @@ func (s *store) CreatePerson(ctx context.Context, caseID, firstName, lastName st
 func (s *store) UpdatePerson(ctx context.Context, caseID, personID string, input UpdatePersonInput) (*Person, error) {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE people SET
-			first_name  = COALESCE($3, first_name),
-			last_name   = COALESCE($4, last_name),
-			birth_date  = CASE WHEN $5 THEN $6::date  ELSE birth_date  END,
-			birth_place = CASE WHEN $7 THEN $8         ELSE birth_place END,
-			death_date  = CASE WHEN $9 THEN $10::date  ELSE death_date  END,
-			notes       = CASE WHEN $11 THEN $12        ELSE notes       END,
-			updated_at  = NOW(), version = version + 1
+			first_name = COALESCE($3, first_name),
+			last_name  = COALESCE($4, last_name),
+			notes      = CASE WHEN $5 THEN $6 ELSE notes END,
+			updated_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		personID, caseID,
 		input.FirstName,
 		input.LastName,
-		input.BirthDate.Set, nullableToSQL(input.BirthDate),
-		input.BirthPlace.Set, nullableToSQL(input.BirthPlace),
-		input.DeathDate.Set, nullableToSQL(input.DeathDate),
 		input.Notes.Set, nullableToSQL(input.Notes),
 	)
 	if err != nil {
@@ -152,36 +126,62 @@ func (s *store) UpdatePerson(ctx context.Context, caseID, personID string, input
 }
 
 func (s *store) getPerson(ctx context.Context, caseID, personID string) (*Person, error) {
-	var p Person
-	var birthDate, birthPlace, deathDate, notes sql.NullString
-	var parentIDs pq.StringArray
-
-	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
-		SELECT
-			id::text, case_id::text,
-			first_name, last_name,
-			birth_date::text, birth_place,
-			death_date::text, notes,
-			version, created_at, updated_at,
-			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN active_people pa ON pa.id = pr.parent_id WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids
-		FROM people
-		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
+	row := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT `+personColumns+`
+		FROM `+personTables+`
+		WHERE people.id = $1 AND people.case_id = $2 AND people.deleted_at IS NULL`,
 		personID, caseID,
-	).Scan(
-		&p.ID, &p.CaseID,
-		&p.FirstName, &p.LastName,
-		&birthDate, &birthPlace,
-		&deathDate, &notes,
-		&p.Version, &p.CreatedAt, &p.UpdatedAt,
-		&parentIDs,
 	)
+	p, err := scanPerson(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get person: %w", err)
 	}
-	assignNullable(&p, birthDate, birthPlace, deathDate, notes)
+	return p, nil
+}
+
+// A person's birth and death are read from their birth and death life events
+// that are not in the trash. There is at most one of each.
+const personTables = `people
+		LEFT JOIN life_events birth ON birth.person_id = people.id
+			AND birth.event_type = 'birth' AND birth.deleted_at IS NULL
+		LEFT JOIN life_events death ON death.person_id = people.id
+			AND death.event_type = 'death' AND death.deleted_at IS NULL`
+
+const personColumns = `
+			people.id::text, people.case_id::text,
+			people.first_name, people.last_name,
+			birth.event_date, birth.event_date_qualifier::text, birth.event_date_end, birth.event_place,
+			death.event_date, death.event_date_qualifier::text, death.event_date_end, death.event_place,
+			people.notes,
+			people.version, people.created_at, people.updated_at,
+			ARRAY(SELECT pr.parent_id::text FROM person_relationships pr JOIN active_people pa ON pa.id = pr.parent_id WHERE pr.person_id = people.id ORDER BY pr.parent_id) AS parent_ids`
+
+// scanPerson reads the columns of personColumns, using the scan function of
+// either *sql.Row or *sql.Rows.
+func scanPerson(scan func(...any) error) (*Person, error) {
+	var p Person
+	var birthDate, deathDate [3]sql.NullString
+	var birthPlace, deathPlace, notes sql.NullString
+	var parentIDs pq.StringArray
+	if err := scan(
+		&p.ID, &p.CaseID,
+		&p.FirstName, &p.LastName,
+		&birthDate[0], &birthDate[1], &birthDate[2], &birthPlace,
+		&deathDate[0], &deathDate[1], &deathDate[2], &deathPlace,
+		&notes,
+		&p.Version, &p.CreatedAt, &p.UpdatedAt,
+		&parentIDs,
+	); err != nil {
+		return nil, err
+	}
+	p.BirthDate = platform.ScanQualifiedDate(birthDate[0], birthDate[1], birthDate[2])
+	p.DeathDate = platform.ScanQualifiedDate(deathDate[0], deathDate[1], deathDate[2])
+	p.BirthPlace = nullable(birthPlace)
+	p.DeathPlace = nullable(deathPlace)
+	p.Notes = nullable(notes)
 	p.ParentIDs = toStringSlice(parentIDs)
 	return &p, nil
 }
@@ -275,20 +275,12 @@ func (s *store) RemoveParent(ctx context.Context, caseID, personID, parentID str
 	return nil
 }
 
-// assignNullable maps scanned NullString values onto a Person pointer.
-func assignNullable(p *Person, birthDate, birthPlace, deathDate, notes sql.NullString) {
-	if birthDate.Valid {
-		p.BirthDate = &birthDate.String
+// nullable turns a scanned NullString into an optional string: nil for null.
+func nullable(n sql.NullString) *string {
+	if !n.Valid {
+		return nil
 	}
-	if birthPlace.Valid {
-		p.BirthPlace = &birthPlace.String
-	}
-	if deathDate.Valid {
-		p.DeathDate = &deathDate.String
-	}
-	if notes.Valid {
-		p.Notes = &notes.String
-	}
+	return &n.String
 }
 
 func toStringSlice(a pq.StringArray) []string {
