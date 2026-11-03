@@ -9,6 +9,7 @@ import type { LifeEvent } from '../../api/lifeevents';
 import { eventTypeLabel } from './options';
 import LifeEventFormModal from './LifeEventFormModal';
 import LifeEventDeleteModal from './LifeEventDeleteModal';
+import { formatQualifiedDate } from '../../lib/dates';
 
 interface LifeEventListSectionProps {
   caseId: string;
@@ -49,7 +50,7 @@ export default function LifeEventListSection({ caseId, personId, lifeEvents }: L
             <div>
               <Text size="sm" fw={500}>{eventTypeLabel(le.event_type)}</Text>
               <Text size="xs" c="dimmed">
-                {[le.event_date, le.event_place].filter(Boolean).join(' · ') || 'No date or place'}
+                {[le.event_date && formatQualifiedDate(le.event_date), le.event_place].filter(Boolean).join(' · ') || 'No date or place'}
               </Text>
             </div>
             <Group gap="xs" wrap="nowrap">

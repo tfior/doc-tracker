@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import type { QualifiedDate } from './dates';
 import { get, post, del } from './client';
 
 export interface TrashedCase {
@@ -28,7 +29,7 @@ export interface TrashedLifeEvent {
   case_id: string;
   person_id: string;
   event_type: string;
-  event_date: string | null;
+  event_date: QualifiedDate | null;
   deleted_at: string;
 }
 

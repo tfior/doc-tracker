@@ -19,6 +19,7 @@ import { personImpactText } from '../people/deletionImpactText';
 import { lifeEventImpactText } from '../life-events/deletionImpactText';
 import TrashRow from './TrashRow';
 import PermanentDeleteModal, { type PermanentDeleteTarget } from './PermanentDeleteModal';
+import { formatQualifiedDate } from '../../lib/dates';
 
 interface TrashItem {
   type: TrashEntityType;
@@ -75,7 +76,7 @@ export default function TrashPage() {
       title: 'Life Events',
       items: trash.life_events.map((le) => ({
         type: 'life-events', id: le.id, label: `${eventTypeLabel(le.event_type)} life event`,
-        meta: le.event_date ?? undefined, deletedAt: le.deleted_at,
+        meta: le.event_date ? formatQualifiedDate(le.event_date) : undefined, deletedAt: le.deleted_at,
         loadGoesWith: async () => lifeEventImpactText(await getLifeEventDeletionImpact(caseId!, le.id), true),
       })),
     },

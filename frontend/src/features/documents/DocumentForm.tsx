@@ -7,10 +7,11 @@ import { Stack, Group, TextInput, Select, Checkbox, Divider, Button } from '@man
 import type { DocumentStatus } from '../../api/documents';
 import type { LifeEvent } from '../../api/lifeevents';
 import type { Person } from '../../api/people';
-import DateField from '../../components/DateField';
+import PartialDateInput from '../../components/PartialDateInput';
 import ErrorMessage from '../../components/ErrorMessage';
 import type { DocumentFormValues } from './documentFormValues';
 import { fieldErrors } from '../../lib/errors';
+import { formatQualifiedDate } from '../../lib/dates';
 import { personOptions } from '../people/personName';
 import { eventTypeLabel } from '../life-events/options';
 import {
@@ -20,7 +21,7 @@ import {
 
 const SHOWN_FIELDS: string[] = [
   'person_id', 'life_event_id', 'document_type', 'title', 'issuing_authority', 'issue_date',
-  'recorded_date', 'recorded_given_name', 'recorded_surname', 'recorded_birth_date',
+  'registration_date', 'recorded_given_name', 'recorded_surname', 'recorded_birth_date',
   'recorded_birth_place', 'notes', 'is_verified', ...PHASES.map(phaseStatusField),
 ];
 
@@ -67,7 +68,7 @@ export default function DocumentForm({
       .filter((le) => le.person_id === values.person_id)
       .map((le) => ({
         value: le.id,
-        label: `${eventTypeLabel(le.event_type)}${le.event_date ? ` — ${le.event_date}` : ''}`,
+        label: `${eventTypeLabel(le.event_type)}${le.event_date ? ` — ${formatQualifiedDate(le.event_date)}` : ''}`,
       })),
   ];
 
@@ -115,26 +116,26 @@ export default function DocumentForm({
       )}
 
       <Divider label="Document details" labelPosition="left" />
-      <Group grow align="flex-start">
-        <TextInput
-          label="Issuing Authority"
-          value={values.issuing_authority}
-          onChange={(e) => set('issuing_authority', e.currentTarget.value)}
-          error={errors.issuing_authority}
-        />
-        <DateField
+      <TextInput
+        label="Issuing Authority"
+        value={values.issuing_authority}
+        onChange={(e) => set('issuing_authority', e.currentTarget.value)}
+        error={errors.issuing_authority}
+      />
+      <Group align="flex-start">
+        <PartialDateInput
           label="Issue Date"
           value={values.issue_date}
           onChange={(v) => set('issue_date', v)}
           error={errors.issue_date}
         />
+        <PartialDateInput
+          label="Registration Date"
+          value={values.registration_date}
+          onChange={(v) => set('registration_date', v)}
+          error={errors.registration_date}
+        />
       </Group>
-      <DateField
-        label="Date Recorded"
-        value={values.recorded_date}
-        onChange={(v) => set('recorded_date', v)}
-        error={errors.recorded_date}
-      />
 
       <Divider label="Recorded information" labelPosition="left" />
       <Group grow align="flex-start">
@@ -151,20 +152,18 @@ export default function DocumentForm({
           error={errors.recorded_surname}
         />
       </Group>
-      <Group grow align="flex-start">
-        <DateField
-          label="Recorded Birth Date"
-          value={values.recorded_birth_date}
-          onChange={(v) => set('recorded_birth_date', v)}
-          error={errors.recorded_birth_date}
-        />
-        <TextInput
-          label="Recorded Birth Place"
-          value={values.recorded_birth_place}
-          onChange={(e) => set('recorded_birth_place', e.currentTarget.value)}
-          error={errors.recorded_birth_place}
-        />
-      </Group>
+      <PartialDateInput
+        label="Recorded Birth Date"
+        value={values.recorded_birth_date}
+        onChange={(v) => set('recorded_birth_date', v)}
+        error={errors.recorded_birth_date}
+      />
+      <TextInput
+        label="Recorded Birth Place"
+        value={values.recorded_birth_place}
+        onChange={(e) => set('recorded_birth_place', e.currentTarget.value)}
+        error={errors.recorded_birth_place}
+      />
 
       {!isNew && (
         <>

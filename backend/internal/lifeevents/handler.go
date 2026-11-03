@@ -46,21 +46,21 @@ func respondError(w http.ResponseWriter, r *http.Request, err error, notFound st
 
 // eventFields is the body shared by create and update.
 type eventFields struct {
-	EventType        *string             `json:"event_type"`
-	EventDate        platform.NullString `json:"event_date"`
-	EventPlace       platform.NullString `json:"event_place"`
-	SpouseName       platform.NullString `json:"spouse_name"`
-	SpouseBirthDate  platform.NullString `json:"spouse_birth_date"`
-	SpouseBirthPlace platform.NullString `json:"spouse_birth_place"`
-	Notes            platform.NullString `json:"notes"`
+	EventType        *string                    `json:"event_type"`
+	EventDate        platform.NullQualifiedDate `json:"event_date"`
+	EventPlace       platform.NullString        `json:"event_place"`
+	SpouseName       platform.NullString        `json:"spouse_name"`
+	SpouseBirthDate  platform.NullQualifiedDate `json:"spouse_birth_date"`
+	SpouseBirthPlace platform.NullString        `json:"spouse_birth_place"`
+	Notes            platform.NullString        `json:"notes"`
 }
 
 func (f *eventFields) validate(v *platform.Validator) {
 	if f.EventType != nil {
 		v.OneOf("event_type", *f.EventType, validEventTypes)
 	}
-	v.Date("event_date", f.EventDate)
-	v.Date("spouse_birth_date", f.SpouseBirthDate)
+	v.QualifiedDate("event_date", &f.EventDate)
+	v.QualifiedDate("spouse_birth_date", &f.SpouseBirthDate)
 }
 
 func (f *eventFields) input() UpdateLifeEventInput {

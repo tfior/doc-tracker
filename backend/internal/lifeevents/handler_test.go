@@ -17,6 +17,7 @@ import (
 	"github.com/tfior/doc-tracker/internal/lifeevents"
 	"github.com/tfior/doc-tracker/internal/people"
 	"github.com/tfior/doc-tracker/internal/testhelpers"
+	"github.com/tfior/doc-tracker/platform"
 )
 
 type testEnv struct {
@@ -101,10 +102,10 @@ func TestCreateLifeEvent_WithOptionalFields(t *testing.T) {
 	rec := env.do("POST", "/api/v1/cases/"+c.ID+"/life-events", map[string]any{
 		"person_id":          p.ID,
 		"event_type":         "marriage",
-		"event_date":         "1920-06-15",
+		"event_date":         map[string]any{"value": "1920-06-15", "qualifier": "exact"},
 		"event_place":        "Naples, Italy",
 		"spouse_name":        "Maria Conti",
-		"spouse_birth_date":  "1900-03-01",
+		"spouse_birth_date":  map[string]any{"value": "1900", "qualifier": "about"},
 		"spouse_birth_place": "Rome, Italy",
 		"notes":              "First marriage",
 	})
@@ -113,13 +114,13 @@ func TestCreateLifeEvent_WithOptionalFields(t *testing.T) {
 	var got lifeevents.LifeEvent
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
 	require.NotNil(t, got.EventDate)
-	assert.Equal(t, "1920-06-15", *got.EventDate)
+	assert.Equal(t, platform.QualifiedDate{Value: "1920-06-15", Qualifier: "exact"}, *got.EventDate)
 	require.NotNil(t, got.EventPlace)
 	assert.Equal(t, "Naples, Italy", *got.EventPlace)
 	require.NotNil(t, got.SpouseName)
 	assert.Equal(t, "Maria Conti", *got.SpouseName)
 	require.NotNil(t, got.SpouseBirthDate)
-	assert.Equal(t, "1900-03-01", *got.SpouseBirthDate)
+	assert.Equal(t, platform.QualifiedDate{Value: "1900", Qualifier: "about"}, *got.SpouseBirthDate)
 	require.NotNil(t, got.SpouseBirthPlace)
 	assert.Equal(t, "Rome, Italy", *got.SpouseBirthPlace)
 	require.NotNil(t, got.Notes)
@@ -215,7 +216,7 @@ func TestUpdateLifeEvent_OptionalFields(t *testing.T) {
 	le := env.createLifeEvent(t, c.ID, p.ID, "birth")
 
 	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/life-events/"+le.ID, map[string]any{
-		"event_date":  "1895-04-10",
+		"event_date":  map[string]any{"value": "1895-04-10", "qualifier": "exact"},
 		"event_place": "Palermo, Italy",
 	})
 
@@ -223,7 +224,7 @@ func TestUpdateLifeEvent_OptionalFields(t *testing.T) {
 	var got lifeevents.LifeEvent
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
 	require.NotNil(t, got.EventDate)
-	assert.Equal(t, "1895-04-10", *got.EventDate)
+	assert.Equal(t, platform.QualifiedDate{Value: "1895-04-10", Qualifier: "exact"}, *got.EventDate)
 	require.NotNil(t, got.EventPlace)
 	assert.Equal(t, "Palermo, Italy", *got.EventPlace)
 }
@@ -237,7 +238,7 @@ func TestUpdateLifeEvent_ClearOptionalField(t *testing.T) {
 	rec := env.do("POST", "/api/v1/cases/"+c.ID+"/life-events", map[string]any{
 		"person_id":  p.ID,
 		"event_type": "birth",
-		"event_date": "1895-04-10",
+		"event_date": map[string]any{"value": "1895-04-10", "qualifier": "exact"},
 	})
 	require.Equal(t, http.StatusCreated, rec.Code)
 	var le lifeevents.LifeEvent

@@ -10,7 +10,8 @@ interface ErrorMessageProps {
   error: unknown;
   /** Heading for the message, such as what was being attempted. */
   title?: string;
-  /** Fields the form shows its own errors beside; their messages are not repeated here. */
+  /** Fields the form shows its own errors beside, including their parts, such
+   * as "event_date.end"; their messages are not repeated here. */
   shownFields?: string[];
   /** Offered when the record changed since it was read. */
   onReload?: () => Promise<void>;
@@ -61,7 +62,7 @@ export default function ErrorMessage({ error, title, shownFields = [], onReload 
 
   const message = errorMessage(error);
   const otherFields = Object.entries(fieldErrors(error))
-    .filter(([field, text]) => !shownFields.includes(field) && text !== message);
+    .filter(([field, text]) => !isShown(field, shownFields) && text !== message);
 
   return (
     <Alert color="red" title={title}>
@@ -75,4 +76,8 @@ export default function ErrorMessage({ error, title, shownFields = [], onReload 
       )}
     </Alert>
   );
+}
+
+function isShown(field: string, shownFields: string[]): boolean {
+  return shownFields.some((f) => field === f || field.startsWith(`${f}.`));
 }

@@ -52,9 +52,9 @@ func (s *store) ListDocuments(ctx context.Context, caseID string) ([]Document, e
 		SELECT
 			d.id::text, d.case_id::text, d.person_id::text, d.life_event_id::text,
 			d.document_type::text, d.title,
-			d.issuing_authority, d.issue_date::text,
-			d.recorded_date::text, d.recorded_given_name, d.recorded_surname,
-			d.recorded_birth_date::text, d.recorded_birth_place,
+			d.issuing_authority, d.issue_date,
+			d.registration_date, d.recorded_given_name, d.recorded_surname,
+			d.recorded_birth_date, d.recorded_birth_place,
 			d.is_verified, d.verified_at, d.notes,
 			oc.id::text, oc.label, oc.phase::text, oc.progress_bucket::text,
 			am.id::text, am.label, am.phase::text, am.progress_bucket::text,
@@ -145,21 +145,21 @@ func (s *store) CreateDocument(ctx context.Context, caseID, personID, docType, t
 			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id,
 			 document_type, title,
 			 issuing_authority, issue_date,
-			 recorded_date, recorded_given_name, recorded_surname,
+			 registration_date, recorded_given_name, recorded_surname,
 			 recorded_birth_date, recorded_birth_place, notes)
 		VALUES ($1, $2, $3::uuid,
 			$4, $5, $6, $7,
 			$8::document_type, $9,
-			$10, $11::date,
-			$12::date, $13, $14,
-			$15::date, $16, $17)
+			$10, $11,
+			$12, $13, $14,
+			$15, $16, $17)
 		RETURNING id::text`,
 		caseID, personID, lifeEventID,
 		defaults["official_copy"], defaults["amendment"], defaults["apostille"], defaults["translation"],
 		docType, title,
 		nullToSQL(input.IssuingAuthority),
 		nullToSQL(input.IssueDate),
-		nullToSQL(input.RecordedDate),
+		nullToSQL(input.RegistrationDate),
 		nullToSQL(input.RecordedGivenName),
 		nullToSQL(input.RecordedSurname),
 		nullToSQL(input.RecordedBirthDate),
@@ -185,11 +185,11 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 			title                = COALESCE($3, title),
 			document_type        = COALESCE($4::document_type, document_type),
 			issuing_authority    = CASE WHEN $5  THEN $6         ELSE issuing_authority    END,
-			issue_date           = CASE WHEN $7  THEN $8::date   ELSE issue_date           END,
-			recorded_date        = CASE WHEN $9  THEN $10::date  ELSE recorded_date        END,
+			issue_date           = CASE WHEN $7  THEN $8         ELSE issue_date           END,
+			registration_date    = CASE WHEN $9  THEN $10        ELSE registration_date    END,
 			recorded_given_name  = CASE WHEN $11 THEN $12        ELSE recorded_given_name  END,
 			recorded_surname     = CASE WHEN $13 THEN $14        ELSE recorded_surname     END,
-			recorded_birth_date  = CASE WHEN $15 THEN $16::date  ELSE recorded_birth_date  END,
+			recorded_birth_date  = CASE WHEN $15 THEN $16        ELSE recorded_birth_date  END,
 			recorded_birth_place = CASE WHEN $17 THEN $18        ELSE recorded_birth_place END,
 			notes                = CASE WHEN $19 THEN $20        ELSE notes                END,
 			is_verified          = CASE WHEN $21 THEN $22        ELSE is_verified          END,
@@ -211,7 +211,7 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 		input.DocumentType,
 		input.IssuingAuthority.Set, nullToSQL(input.IssuingAuthority),
 		input.IssueDate.Set, nullToSQL(input.IssueDate),
-		input.RecordedDate.Set, nullToSQL(input.RecordedDate),
+		input.RegistrationDate.Set, nullToSQL(input.RegistrationDate),
 		input.RecordedGivenName.Set, nullToSQL(input.RecordedGivenName),
 		input.RecordedSurname.Set, nullToSQL(input.RecordedSurname),
 		input.RecordedBirthDate.Set, nullToSQL(input.RecordedBirthDate),
@@ -260,9 +260,9 @@ func (s *store) getDocument(ctx context.Context, caseID, docID string) (*Documen
 		SELECT
 			d.id::text, d.case_id::text, d.person_id::text, d.life_event_id::text,
 			d.document_type::text, d.title,
-			d.issuing_authority, d.issue_date::text,
-			d.recorded_date::text, d.recorded_given_name, d.recorded_surname,
-			d.recorded_birth_date::text, d.recorded_birth_place,
+			d.issuing_authority, d.issue_date,
+			d.registration_date, d.recorded_given_name, d.recorded_surname,
+			d.recorded_birth_date, d.recorded_birth_place,
 			d.is_verified, d.verified_at, d.notes,
 			oc.id::text, oc.label, oc.phase::text, oc.progress_bucket::text,
 			am.id::text, am.label, am.phase::text, am.progress_bucket::text,
@@ -317,7 +317,7 @@ func (s *store) phaseDefaults(ctx context.Context) (map[string]string, error) {
 func scanDocument(scan func(...any) error) (*Document, error) {
 	var d Document
 	var lifeEventID, issuingAuthority, issueDate sql.NullString
-	var recordedDate, recordedGivenName, recordedSurname sql.NullString
+	var registrationDate, recordedGivenName, recordedSurname sql.NullString
 	var recordedBirthDate, recordedBirthPlace, notes sql.NullString
 	var verifiedAt sql.NullTime
 
@@ -325,7 +325,7 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 		&d.ID, &d.CaseID, &d.PersonID, &lifeEventID,
 		&d.DocumentType, &d.Title,
 		&issuingAuthority, &issueDate,
-		&recordedDate, &recordedGivenName, &recordedSurname,
+		&registrationDate, &recordedGivenName, &recordedSurname,
 		&recordedBirthDate, &recordedBirthPlace,
 		&d.IsVerified, &verifiedAt, &notes,
 		&d.OfficialCopyStatus.ID, &d.OfficialCopyStatus.Label, &d.OfficialCopyStatus.Phase, &d.OfficialCopyStatus.ProgressBucket,
@@ -340,7 +340,7 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 	setString(&d.LifeEventID, lifeEventID)
 	setString(&d.IssuingAuthority, issuingAuthority)
 	setString(&d.IssueDate, issueDate)
-	setString(&d.RecordedDate, recordedDate)
+	setString(&d.RegistrationDate, registrationDate)
 	setString(&d.RecordedGivenName, recordedGivenName)
 	setString(&d.RecordedSurname, recordedSurname)
 	setString(&d.RecordedBirthDate, recordedBirthDate)

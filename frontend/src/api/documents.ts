@@ -20,7 +20,7 @@ export interface Document {
   title: string;
   issuing_authority: string | null;
   issue_date: string | null;
-  recorded_date: string | null;
+  registration_date: string | null;
   recorded_given_name: string | null;
   recorded_surname: string | null;
   recorded_birth_date: string | null;
@@ -53,7 +53,7 @@ export interface DocumentInput {
   document_type?: string;
   issuing_authority?: string | null;
   issue_date?: string | null;
-  recorded_date?: string | null;
+  registration_date?: string | null;
   recorded_given_name?: string | null;
   recorded_surname?: string | null;
   recorded_birth_date?: string | null;

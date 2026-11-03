@@ -164,7 +164,7 @@ Validation errors also list each field at fault, with a message a user can act o
     "code": "invalid_input",
     "message": "Some fields are invalid",
     "fields": [
-      { "field": "event_date", "code": "invalid_partial_date", "message": "Enter a year, a year and month, or a full date" },
+      { "field": "event_date.value", "code": "invalid_date", "message": "Enter a year, a year and month, or a full date, for example 1890, 1890-03 or 1890-03-15." },
       { "field": "title", "code": "required", "message": "Title is required" }
     ]
   }
@@ -229,6 +229,9 @@ Dates that describe people, events, and documents are not timestamps. They may b
 - `qualifier` is one of `exact`, `about`, `before`, `after`, `between`.
 - `end` is required for `between` and not allowed otherwise.
 - An unknown date is `null`, not an object with empty parts.
+- A qualified date is sent and replaced whole. Updating `qualifier` alone means sending the whole object again.
+- The end of a `between` range must begin after its start ends: `1890` to `1892` is a range, `1890` to `1890-06` is not.
+- A field error on part of a qualified date names the part: `event_date.value`, `event_date.qualifier`, `event_date.end`.
 - Which fields are partial dates and which are qualified dates is defined in the domain model.
 
 ## Timestamps

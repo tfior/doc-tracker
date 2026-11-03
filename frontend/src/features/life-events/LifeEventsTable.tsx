@@ -7,6 +7,7 @@ import type { LifeEvent } from '../../api/lifeevents';
 import type { Person } from '../../api/people';
 import { personName } from '../people/personName';
 import { eventTypeLabel } from './options';
+import { formatQualifiedDate } from '../../lib/dates';
 
 interface LifeEventsTableProps {
   lifeEvents: LifeEvent[];
@@ -40,7 +41,7 @@ export default function LifeEventsTable({ lifeEvents, people, onEdit, onDelete }
           <Table.Tr key={e.id} onClick={() => onEdit(e)} style={{ cursor: 'pointer' }}>
             <Table.Td>{personName(e.person_id, people)}</Table.Td>
             <Table.Td>{eventTypeLabel(e.event_type)}</Table.Td>
-            <Table.Td>{e.event_date ?? '—'}</Table.Td>
+            <Table.Td>{e.event_date ? formatQualifiedDate(e.event_date) : '—'}</Table.Td>
             <Table.Td>{e.event_place ?? '—'}</Table.Td>
             <Table.Td>
               {!e.has_documents && (

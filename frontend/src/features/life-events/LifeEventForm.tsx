@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { Stack, Group, TextInput, Select, Button } from '@mantine/core';
 import type { Person } from '../../api/people';
-import DateField from '../../components/DateField';
+import QualifiedDateInput from '../../components/QualifiedDateInput';
 import ErrorMessage from '../../components/ErrorMessage';
 import type { LifeEventFormValues } from './lifeEventFormValues';
 import { fieldErrors } from '../../lib/errors';
@@ -62,15 +62,19 @@ export default function LifeEventForm({
         error={errors.event_type}
         required
       />
-      <Group grow align="flex-start">
-        <DateField label="Date" value={values.event_date} onChange={(v) => set('event_date', v)} error={errors.event_date} />
-        <TextInput
-          label="Place"
-          value={values.event_place}
-          onChange={(e) => set('event_place', e.currentTarget.value)}
-          error={errors.event_place}
-        />
-      </Group>
+      <QualifiedDateInput
+        label="Date"
+        field="event_date"
+        value={values.event_date}
+        onChange={(v) => set('event_date', v)}
+        errors={errors}
+      />
+      <TextInput
+        label="Place"
+        value={values.event_place}
+        onChange={(e) => set('event_place', e.currentTarget.value)}
+        error={errors.event_place}
+      />
       {values.event_type === 'marriage' && (
         <>
           <TextInput
@@ -79,20 +83,19 @@ export default function LifeEventForm({
             onChange={(e) => set('spouse_name', e.currentTarget.value)}
             error={errors.spouse_name}
           />
-          <Group grow align="flex-start">
-            <DateField
-              label="Spouse Birth Date"
-              value={values.spouse_birth_date}
-              onChange={(v) => set('spouse_birth_date', v)}
-              error={errors.spouse_birth_date}
-            />
-            <TextInput
-              label="Spouse Birth Place"
-              value={values.spouse_birth_place}
-              onChange={(e) => set('spouse_birth_place', e.currentTarget.value)}
-              error={errors.spouse_birth_place}
-            />
-          </Group>
+          <QualifiedDateInput
+            label="Spouse Birth Date"
+            field="spouse_birth_date"
+            value={values.spouse_birth_date}
+            onChange={(v) => set('spouse_birth_date', v)}
+            errors={errors}
+          />
+          <TextInput
+            label="Spouse Birth Place"
+            value={values.spouse_birth_place}
+            onChange={(e) => set('spouse_birth_place', e.currentTarget.value)}
+            error={errors.spouse_birth_place}
+          />
         </>
       )}
       <TextInput
