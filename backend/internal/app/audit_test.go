@@ -168,7 +168,7 @@ func TestLog_EveryEntryHasReadableName(t *testing.T) {
 		"case":                "Rossi family",
 		"person":              "", // checked per person below
 		"person_relationship": "Giuseppe Rossi as parent of Antonio Rossi",
-		"life_event":          "Birth life event for Giuseppe Rossi",
+		"life_event":          "Naturalization life event for Giuseppe Rossi",
 		"document":            "Italian birth certificate",
 		"claim_line":          "Claim line through Giuseppe Rossi",
 	}

@@ -5,14 +5,14 @@
 import { useState } from 'react';
 import { Stack, Group, TextInput, MultiSelect, Button } from '@mantine/core';
 import type { Person } from '../../api/people';
-import DateField from '../../components/DateField';
+import QualifiedDateInput from '../../components/QualifiedDateInput';
 import ErrorMessage from '../../components/ErrorMessage';
 import type { PersonFormValues } from './personFormValues';
 import { fieldErrors } from '../../lib/errors';
 import { personOptions } from './personName';
 
 const SHOWN_FIELDS = [
-  'first_name', 'last_name', 'birth_date', 'birth_place', 'death_date', 'notes', 'parent_ids', 'child_ids',
+  'first_name', 'last_name', 'birth_date', 'birth_place', 'death_date', 'death_place', 'notes', 'parent_ids', 'child_ids',
 ];
 
 interface PersonFormProps {
@@ -25,14 +25,18 @@ interface PersonFormProps {
   onSubmit: (values: PersonFormValues) => void;
   onCancel: () => void;
   onReload: () => Promise<void>;
+  /** Told of each edit, so unsaved changes can be kept if the form restarts. */
+  onEdit?: (values: PersonFormValues) => void;
 }
 
-export default function PersonForm({ initial, isNew, others, saving, error, onSubmit, onCancel, onReload }: PersonFormProps) {
+export default function PersonForm({ initial, isNew, others, saving, error, onSubmit, onCancel, onReload, onEdit }: PersonFormProps) {
   const [values, setValues] = useState(initial);
   const errors = fieldErrors(error);
 
   function set<K extends keyof PersonFormValues>(key: K, value: PersonFormValues[K]) {
-    setValues((prev) => ({ ...prev, [key]: value }));
+    const next = { ...values, [key]: value };
+    setValues(next);
+    onEdit?.(next);
   }
 
   // Someone cannot be both a parent and a child of the same person.
@@ -58,16 +62,32 @@ export default function PersonForm({ initial, isNew, others, saving, error, onSu
           required
         />
       </Group>
-      <Group grow align="flex-start">
-        <DateField label="Birth Date" value={values.birth_date} onChange={(v) => set('birth_date', v)} error={errors.birth_date} />
-        <TextInput
-          label="Birth Place"
-          value={values.birth_place}
-          onChange={(e) => set('birth_place', e.currentTarget.value)}
-          error={errors.birth_place}
-        />
-      </Group>
-      <DateField label="Death Date" value={values.death_date} onChange={(v) => set('death_date', v)} error={errors.death_date} />
+      <QualifiedDateInput
+        label="Birth Date"
+        field="birth_date"
+        value={values.birth_date}
+        onChange={(v) => set('birth_date', v)}
+        errors={errors}
+      />
+      <TextInput
+        label="Birth Place"
+        value={values.birth_place}
+        onChange={(e) => set('birth_place', e.currentTarget.value)}
+        error={errors.birth_place}
+      />
+      <QualifiedDateInput
+        label="Death Date"
+        field="death_date"
+        value={values.death_date}
+        onChange={(v) => set('death_date', v)}
+        errors={errors}
+      />
+      <TextInput
+        label="Death Place"
+        value={values.death_place}
+        onChange={(e) => set('death_place', e.currentTarget.value)}
+        error={errors.death_place}
+      />
       <TextInput
         label="Notes"
         value={values.notes}

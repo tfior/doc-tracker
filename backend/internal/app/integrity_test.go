@@ -51,10 +51,12 @@ func (e *env) mustAddParent(t *testing.T, caseID, childID, parentID string) {
 	require.Equal(t, http.StatusOK, rec.Code, "setup: add parent: %s", rec.Body.String())
 }
 
+// createLifeEvent creates a naturalization event: a type a person may have any
+// number of, and which is not part of the person as a birth or death is.
 func (e *env) createLifeEvent(t *testing.T, caseID, personID string) string {
 	t.Helper()
 	return e.c.MustCreate(t, "/api/v1/cases/"+caseID+"/life-events",
-		map[string]any{"person_id": personID, "event_type": "birth"})
+		map[string]any{"person_id": personID, "event_type": "naturalization"})
 }
 
 // createDocument creates a document for a person, under a life event when eventID is not empty.

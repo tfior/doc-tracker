@@ -218,8 +218,8 @@ API
 - [x] Partial date and qualified date types, with validation and the earliest and latest day each represents
 - [x] Migration: life event dates become qualified dates and document dates become partial dates, preserving existing values
 - [x] `recorded_date` renamed to `registration_date`
-- [ ] Person birth and death fields removed; values migrated into birth and death life events
-- [ ] At most one birth event and one death event per person; saving a person writes them in the same transaction
+- [x] Person birth and death fields removed; values migrated into birth and death life events
+- [x] At most one birth event and one death event per person; saving a person writes them in the same transaction
 - [ ] `divorce_date` and `divorce_place` on marriage events
 - [ ] `spouse_person_id` on marriage events; a person's life events include marriages where they are the linked spouse
 - [ ] A shared marriage survives the deletion of one spouse
@@ -229,7 +229,7 @@ API
 ### Frontend
 
 - [x] A shared date input in `components/`: a qualifier and separate year, month and day fields, with month and day optional and impossible days not offered
-- [ ] The person form edits birth and death through their life events
+- [x] The person form edits birth and death through their life events
 - [ ] The marriage form can link the spouse to a person in the case, and has a "Marriage ended in divorce" section
 - [ ] Wording: "Root Ancestor", "Registration date", and the "As recorded in document" heading
 - [x] Every date is displayed in words, day first: "4 March 1890", "March 1890", "about 1890"

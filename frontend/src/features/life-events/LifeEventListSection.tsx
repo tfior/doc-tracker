@@ -15,10 +15,12 @@ interface LifeEventListSectionProps {
   caseId: string;
   personId: string;
   lifeEvents: LifeEvent[];
+  /** Called after an event is added, changed or deleted here. */
+  onChanged?: () => void;
 }
 
 /** A person's life events, managed from inside the person's modal. */
-export default function LifeEventListSection({ caseId, personId, lifeEvents }: LifeEventListSectionProps) {
+export default function LifeEventListSection({ caseId, personId, lifeEvents, onChanged }: LifeEventListSectionProps) {
   const [formOpened, formHandlers] = useDisclosure(false);
   const [deleteOpened, deleteHandlers] = useDisclosure(false);
   const [editing, setEditing] = useState<LifeEvent | null>(null);
@@ -67,8 +69,15 @@ export default function LifeEventListSection({ caseId, personId, lifeEvents }: L
         opened={formOpened}
         onClose={formHandlers.close}
         lockedPersonId={personId}
+        onSaved={onChanged}
       />
-      <LifeEventDeleteModal caseId={caseId} record={deleting} opened={deleteOpened} onClose={deleteHandlers.close} />
+      <LifeEventDeleteModal
+        caseId={caseId}
+        record={deleting}
+        opened={deleteOpened}
+        onClose={deleteHandlers.close}
+        onDeleted={onChanged}
+      />
     </>
   );
 }

@@ -146,7 +146,7 @@ The applicants of an Application. A bare join table with no soft-delete.
 ### Person
 A person in the lineage graph, scoped per case for MVP. `first_name` and `last_name` are working identity — not verified facts. Recorded name data lives on Document. Persons cannot be reassigned across Cases.
 
-A Person has no birth or death fields of its own. Birth date, birth place, and death date are the `event_date` and `event_place` of the Person's birth and death LifeEvents. The person form shows and edits them, creating or updating those LifeEvents behind the scenes.
+A Person has no birth or death fields of its own. Birth date, birth place, death date, and death place are the `event_date` and `event_place` of the Person's birth and death LifeEvents. The person form shows and edits them, creating or updating those LifeEvents behind the scenes.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -354,8 +354,8 @@ A **supporting** file is anything else worth keeping with the document, such as 
 3. A divorce is recorded on the marriage LifeEvent it ended (`divorce_date`, `divorce_place`); there is no divorce event type.
 4. PersonRelationship is parent-child only.
 5. Person records are scoped per case for MVP.
-6. A Person's birth and death facts live on LifeEvents. A Person has at most one birth event and at most one death event.
-7. Case, Person, LifeEvent, Document, ClaimLine, and Application each carry a `version` that increases on every change. A change must state the version it was based on. If the record has changed since, the change is refused and nothing is saved, so one user's save never silently overwrites another's. A family link belongs to both people it joins, so adding or removing one counts as a change to both.
+6. A Person's birth and death facts live on LifeEvents. A Person has at most one birth event and at most one death event. Adding a second, changing an event's type, moving an event to another Person, or restoring one from the trash is refused when it would break this.
+7. Case, Person, LifeEvent, Document, ClaimLine, and Application each carry a `version` that increases on every change. A change must state the version it was based on. If the record has changed since, the change is refused and nothing is saved, so one user's save never silently overwrites another's. A family link belongs to both people it joins, so adding or removing one counts as a change to both. A Person's birth and death events are part of the Person, so a change to either counts as a change to the Person too.
 
 ### Cases
 

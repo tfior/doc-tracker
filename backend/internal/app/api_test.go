@@ -350,8 +350,8 @@ func TestErrors_MalformedIDIsInvalidInput(t *testing.T) {
 	}
 }
 
-// Scenario 13. Only YYYY-MM-DD is accepted, so a date is never reinterpreted:
-// the database would otherwise read "03/04/1890" month-first as 4 March.
+// Scenario 13. Only YYYY, YYYY-MM and YYYY-MM-DD are accepted, so a date is
+// never reinterpreted: "03/04/1890" could be read either way round.
 func TestErrors_InvalidDateIsFieldError(t *testing.T) {
 	e := newEnv(t)
 	c := e.createCase(t)
@@ -363,11 +363,11 @@ func TestErrors_InvalidDateIsFieldError(t *testing.T) {
 	} {
 		t.Run(date, func(t *testing.T) {
 			rec := e.c.Do("POST", "/api/v1/cases/"+c+"/people",
-				map[string]any{"first_name": "Giuseppe", "last_name": "Rossi", "birth_date": date})
+				map[string]any{"first_name": "Giuseppe", "last_name": "Rossi", "birth_date": qualified(date, "exact")})
 
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
 			_, errs := fieldErrors(t, rec)
-			fe := errorFor(errs, "birth_date")
+			fe := errorFor(errs, "birth_date.value")
 			if assert.NotNil(t, fe) {
 				assert.Equal(t, "invalid_date", fe.Code)
 			}

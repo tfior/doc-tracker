@@ -18,9 +18,11 @@ interface LifeEventDeleteModalProps {
   record: LifeEvent | null;
   opened: boolean;
   onClose: () => void;
+  /** Called after the delete. */
+  onDeleted?: () => void;
 }
 
-export default function LifeEventDeleteModal({ caseId, record, opened, onClose }: LifeEventDeleteModalProps) {
+export default function LifeEventDeleteModal({ caseId, record, opened, onClose, onDeleted }: LifeEventDeleteModalProps) {
   const queryClient = useQueryClient();
   const people = useQuery(peopleQuery(caseId)).data?.items ?? [];
 
@@ -36,7 +38,10 @@ export default function LifeEventDeleteModal({ caseId, record, opened, onClose }
     record, opened, onClose,
     remove: (le) => deleteLifeEvent(caseId, le.id, le.version),
     load: async () => (await queryClient.fetchQuery({ ...lifeEventsQuery(caseId), staleTime: 0 })).items,
-    onDeleted: () => invalidateCase(queryClient, caseId),
+    onDeleted: () => {
+      invalidateCase(queryClient, caseId);
+      onDeleted?.();
+    },
   });
 
   async function reload() {

@@ -3,15 +3,18 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { get, post, patch, del, type Items } from './client';
+import type { QualifiedDate } from './dates';
 
 export interface Person {
   id: string;
   case_id: string;
   first_name: string;
   last_name: string;
-  birth_date: string | null;
+  /** Birth and death are read from the person's birth and death life events. */
+  birth_date: QualifiedDate | null;
   birth_place: string | null;
-  death_date: string | null;
+  death_date: QualifiedDate | null;
+  death_place: string | null;
   notes: string | null;
   parent_ids: string[];
   version: number;
@@ -22,9 +25,11 @@ export interface Person {
 export interface PersonInput {
   first_name?: string;
   last_name?: string;
-  birth_date?: string | null;
+  /** Birth and death are saved to the person's birth and death life events. */
+  birth_date?: QualifiedDate | null;
   birth_place?: string | null;
-  death_date?: string | null;
+  death_date?: QualifiedDate | null;
+  death_place?: string | null;
   notes?: string | null;
   /** The full list of parents: what is sent replaces the current links. */
   parent_ids?: string[];

@@ -18,16 +18,52 @@ type CaseChecker interface {
 	RequireActive(ctx context.Context, caseID string) error
 }
 
+// VitalEvents is what this module needs from the lifeevents module: a
+// person's birth and death are their birth and death life events, written
+// through the person in the same transaction.
+type VitalEvents interface {
+	SetVitalEvent(ctx context.Context, caseID, personID, eventType string, date platform.NullQualifiedDate, place platform.NullString) error
+}
+
 type Service struct {
-	store Store
-	db    *sql.DB
-	log   *activitylog.Service
-	rec   *activitylog.Recorder
-	cases CaseChecker
+	store  Store
+	db     *sql.DB
+	log    *activitylog.Service
+	rec    *activitylog.Recorder
+	cases  CaseChecker
+	events VitalEvents
 }
 
 func NewService(store Store, db *sql.DB, log *activitylog.Service, cases CaseChecker) *Service {
 	return &Service{store: store, db: db, log: log, rec: log.For("person", store.LogName), cases: cases}
+}
+
+// SetVitalEvents supplies the lifeevents module. It is set after construction
+// because the lifeevents module also depends on this one.
+func (s *Service) SetVitalEvents(events VitalEvents) {
+	s.events = events
+}
+
+// setVitalEvents writes the person's birth and death through their life events.
+func (s *Service) setVitalEvents(ctx context.Context, caseID, personID string, input UpdatePersonInput) error {
+	if s.events == nil {
+		return errors.New("people: vital events not set")
+	}
+	if err := s.events.SetVitalEvent(ctx, caseID, personID, "birth", input.BirthDate, input.BirthPlace); err != nil {
+		return err
+	}
+	return s.events.SetVitalEvent(ctx, caseID, personID, "death", input.DeathDate, input.DeathPlace)
+}
+
+// LockPeople and BumpVersions let the lifeevents module record a change to a
+// person whose birth or death event changes (domain-model.md, rule 7). The
+// person is locked before the event, the order a person's own save uses.
+func (s *Service) LockPeople(ctx context.Context, ids ...string) error {
+	return s.store.LockPeople(ctx, ids...)
+}
+
+func (s *Service) BumpVersions(ctx context.Context, caseID string, ids []string) error {
+	return s.store.BumpVersions(ctx, caseID, ids)
 }
 
 func (s *Service) ListPeople(ctx context.Context, caseID string) ([]Person, error) {
@@ -76,6 +112,9 @@ func (s *Service) CreatePerson(ctx context.Context, caseID, firstName, lastName 
 		if err := s.rec.Record(ctx, caseID, "created", p.ID, nil); err != nil {
 			return err
 		}
+		if err := s.setVitalEvents(ctx, caseID, p.ID, input); err != nil {
+			return err
+		}
 		if err := s.setLinks(ctx, caseID, p.ID, input.ParentIDs, input.ChildIDs); err != nil {
 			return err
 		}
@@ -99,6 +138,9 @@ func (s *Service) UpdatePerson(ctx context.Context, caseID, personID string, inp
 			return err
 		}
 		if _, err = s.store.UpdatePerson(ctx, caseID, personID, input); err != nil {
+			return err
+		}
+		if err := s.setVitalEvents(ctx, caseID, personID, input); err != nil {
 			return err
 		}
 		if err := s.setLinks(ctx, caseID, personID, input.ParentIDs, input.ChildIDs); err != nil {
