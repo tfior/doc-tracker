@@ -19,7 +19,7 @@ type UpdateDocumentInput struct {
 	DocumentType       *string
 	IssuingAuthority   platform.NullString
 	IssueDate          platform.NullString
-	RecordedDate       platform.NullString
+	RegistrationDate   platform.NullString
 	RecordedGivenName  platform.NullString
 	RecordedSurname    platform.NullString
 	RecordedBirthDate  platform.NullString
@@ -61,7 +61,7 @@ type Document struct {
 	Title              string      `json:"title"`
 	IssuingAuthority   *string     `json:"issuing_authority"`
 	IssueDate          *string     `json:"issue_date"`
-	RecordedDate       *string     `json:"recorded_date"`
+	RegistrationDate   *string     `json:"registration_date"`
 	RecordedGivenName  *string     `json:"recorded_given_name"`
 	RecordedSurname    *string     `json:"recorded_surname"`
 	RecordedBirthDate  *string     `json:"recorded_birth_date"`
@@ -96,7 +96,7 @@ func (d *Document) logFields() activitylog.Fields {
 		"title":                d.Title,
 		"issuing_authority":    activitylog.Value(d.IssuingAuthority),
 		"issue_date":           activitylog.Value(d.IssueDate),
-		"recorded_date":        activitylog.Value(d.RecordedDate),
+		"registration_date":    activitylog.Value(d.RegistrationDate),
 		"recorded_given_name":  activitylog.Value(d.RecordedGivenName),
 		"recorded_surname":     activitylog.Value(d.RecordedSurname),
 		"recorded_birth_date":  activitylog.Value(d.RecordedBirthDate),

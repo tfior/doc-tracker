@@ -57,7 +57,7 @@ func (s *store) GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, er
 
 	leRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT id::text, case_id::text, person_id::text, event_type::text,
-		       event_date::text, created_at, updated_at, deleted_at
+		       event_date, event_date_qualifier::text, event_date_end, created_at, updated_at, deleted_at
 		FROM life_events WHERE case_id = $1 AND deleted_at IS NOT NULL
 		ORDER BY deleted_at DESC`, caseID)
 	if err != nil {
@@ -66,13 +66,11 @@ func (s *store) GetCaseTrash(ctx context.Context, caseID string) (*CaseTrash, er
 	defer leRows.Close()
 	for leRows.Next() {
 		var le TrashedLifeEvent
-		var eventDate sql.NullString
-		if err := leRows.Scan(&le.ID, &le.CaseID, &le.PersonID, &le.EventType, &eventDate, &le.CreatedAt, &le.UpdatedAt, &le.DeletedAt); err != nil {
+		var date, qualifier, end sql.NullString
+		if err := leRows.Scan(&le.ID, &le.CaseID, &le.PersonID, &le.EventType, &date, &qualifier, &end, &le.CreatedAt, &le.UpdatedAt, &le.DeletedAt); err != nil {
 			return nil, fmt.Errorf("scan trashed life event: %w", err)
 		}
-		if eventDate.Valid {
-			le.EventDate = &eventDate.String
-		}
+		le.EventDate = platform.ScanQualifiedDate(date, qualifier, end)
 		t.LifeEvents = append(t.LifeEvents, le)
 	}
 	if err := leRows.Err(); err != nil {
@@ -175,7 +173,7 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 
 	leRows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
 		SELECT le.id::text, le.case_id::text, le.person_id::text, le.event_type::text,
-		       le.event_date::text, le.created_at, le.updated_at, le.deleted_at
+		       le.event_date, le.event_date_qualifier::text, le.event_date_end, le.created_at, le.updated_at, le.deleted_at
 		FROM life_events le
 		JOIN cases c ON c.id = le.case_id
 		WHERE le.deleted_at IS NOT NULL AND c.deleted_at IS NULL
@@ -186,13 +184,11 @@ func (s *store) GetGlobalTrash(ctx context.Context) (*GlobalTrash, error) {
 	defer leRows.Close()
 	for leRows.Next() {
 		var le TrashedLifeEvent
-		var eventDate sql.NullString
-		if err := leRows.Scan(&le.ID, &le.CaseID, &le.PersonID, &le.EventType, &eventDate, &le.CreatedAt, &le.UpdatedAt, &le.DeletedAt); err != nil {
+		var date, qualifier, end sql.NullString
+		if err := leRows.Scan(&le.ID, &le.CaseID, &le.PersonID, &le.EventType, &date, &qualifier, &end, &le.CreatedAt, &le.UpdatedAt, &le.DeletedAt); err != nil {
 			return nil, fmt.Errorf("scan trashed life event globally: %w", err)
 		}
-		if eventDate.Valid {
-			le.EventDate = &eventDate.String
-		}
+		le.EventDate = platform.ScanQualifiedDate(date, qualifier, end)
 		t.LifeEvents = append(t.LifeEvents, le)
 	}
 	if err := leRows.Err(); err != nil {

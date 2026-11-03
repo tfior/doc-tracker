@@ -4,7 +4,11 @@
 
 package trash
 
-import "time"
+import (
+	"time"
+
+	"github.com/tfior/doc-tracker/platform"
+)
 
 type TrashedCase struct {
 	ID        string    `json:"id"`
@@ -26,14 +30,14 @@ type TrashedPerson struct {
 }
 
 type TrashedLifeEvent struct {
-	ID        string    `json:"id"`
-	CaseID    string    `json:"case_id"`
-	PersonID  string    `json:"person_id"`
-	EventType string    `json:"event_type"`
-	EventDate *string   `json:"event_date"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	DeletedAt time.Time `json:"deleted_at"`
+	ID        string                  `json:"id"`
+	CaseID    string                  `json:"case_id"`
+	PersonID  string                  `json:"person_id"`
+	EventType string                  `json:"event_type"`
+	EventDate *platform.QualifiedDate `json:"event_date"`
+	CreatedAt time.Time               `json:"created_at"`
+	UpdatedAt time.Time               `json:"updated_at"`
+	DeletedAt time.Time               `json:"deleted_at"`
 }
 
 type TrashedDocument struct {

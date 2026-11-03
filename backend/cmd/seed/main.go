@@ -166,58 +166,58 @@ func seed(db *sql.DB) error {
 	// -------------------------------------------------------------------------
 
 	giuseppeBirthID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place)
-		VALUES ($1, $2, 'birth', $3, $4) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place)
+		VALUES ($1, $2, 'birth', $3, 'exact', $4) RETURNING id::text`,
 		caseID, giuseppeID, "1875-03-15", "Palermo, Sicily, Italy")
 
 	giuseppeMarriageID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place, spouse_name, spouse_birth_place)
-		VALUES ($1, $2, 'marriage', $3, $4, $5, $6) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place, spouse_name, spouse_birth_place)
+		VALUES ($1, $2, 'marriage', $3, 'exact', $4, $5, $6) RETURNING id::text`,
 		caseID, giuseppeID, "1902-06-10", "New York, NY", "Maria Ferretti", "Naples, Italy")
 
 	giuseppeDeathID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place)
-		VALUES ($1, $2, 'death', $3, $4) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place)
+		VALUES ($1, $2, 'death', $3, 'exact', $4) RETURNING id::text`,
 		caseID, giuseppeID, "1952-11-03", "New York, NY")
 
 	antonioBirthID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place)
-		VALUES ($1, $2, 'birth', $3, $4) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place)
+		VALUES ($1, $2, 'birth', $3, 'exact', $4) RETURNING id::text`,
 		caseID, antonioID, "1905-09-22", "New York, NY")
 
 	antonioMarriageID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place, spouse_name, spouse_birth_place)
-		VALUES ($1, $2, 'marriage', $3, $4, $5, $6) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place, spouse_name, spouse_birth_place)
+		VALUES ($1, $2, 'marriage', $3, 'exact', $4, $5, $6) RETURNING id::text`,
 		caseID, antonioID, "1930-04-18", "Brooklyn, NY", "Maria Conti", "Sicily, Italy")
 
 	antonioDeathID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place)
-		VALUES ($1, $2, 'death', $3, $4) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place)
+		VALUES ($1, $2, 'death', $3, 'exact', $4) RETURNING id::text`,
 		caseID, antonioID, "1978-05-20", "New York, NY")
 
 	carloBirthID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place)
-		VALUES ($1, $2, 'birth', $3, $4) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place)
+		VALUES ($1, $2, 'birth', $3, 'exact', $4) RETURNING id::text`,
 		caseID, carloID, "1932-08-11", "Brooklyn, NY")
 
 	carloMarriageID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place, spouse_name, spouse_birth_place)
-		VALUES ($1, $2, 'marriage', $3, $4, $5, $6) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place, spouse_name, spouse_birth_place)
+		VALUES ($1, $2, 'marriage', $3, 'exact', $4, $5, $6) RETURNING id::text`,
 		caseID, carloID, "1958-09-14", "Queens, NY", "Linda Walsh", "Boston, MA")
 
 	carloDeathID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place)
-		VALUES ($1, $2, 'death', $3, $4) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place)
+		VALUES ($1, $2, 'death', $3, 'exact', $4) RETURNING id::text`,
 		caseID, carloID, "2015-02-27", "Queens, NY")
 
 	sofiaBirthID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place)
-		VALUES ($1, $2, 'birth', $3, $4) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place)
+		VALUES ($1, $2, 'birth', $3, 'exact', $4) RETURNING id::text`,
 		caseID, sofiaID, "1962-03-08", "Queens, NY")
 
 	sofiaMarriageID := s.id(`
-		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_place, spouse_name)
-		VALUES ($1, $2, 'marriage', $3, $4, $5) RETURNING id::text`,
+		INSERT INTO life_events (case_id, person_id, event_type, event_date, event_date_qualifier, event_place, spouse_name)
+		VALUES ($1, $2, 'marriage', $3, 'exact', $4, $5) RETURNING id::text`,
 		caseID, sofiaID, "1990-07-22", "New York, NY", "Marco Martini")
 
 	// -------------------------------------------------------------------------

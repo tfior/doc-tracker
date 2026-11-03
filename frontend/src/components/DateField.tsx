@@ -17,7 +17,8 @@ interface DateFieldProps {
 /**
  * A date typed as YYYY-MM-DD. The format is checked as the user types, once a
  * full date's worth has been entered or the field is left, so a half-typed date
- * is not flagged. Replaced by the segmented date input in Milestone 4.
+ * is not flagged. Used only for a person's birth and death dates, which move
+ * into their life events in Milestone 4, taking this field with them.
  */
 export default function DateField({ label, value, onChange, error }: DateFieldProps) {
   const [left, setLeft] = useState(false);

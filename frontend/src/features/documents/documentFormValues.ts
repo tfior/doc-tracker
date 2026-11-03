@@ -4,19 +4,20 @@
 
 import type { Document, DocumentInput } from '../../api/documents';
 import { PHASES, phaseStatus, phaseStatusField } from './options';
+import { dateParts, partialDate, type DateParts } from '../../lib/dates';
 
-// Field values as typed. Blank text stands for "none".
+// Field values as typed. Blank text stands for "none", as does a date with no year.
 export interface DocumentFormValues {
   person_id: string;
   life_event_id: string;
   document_type: string;
   title: string;
   issuing_authority: string;
-  issue_date: string;
-  recorded_date: string;
+  issue_date: DateParts;
+  registration_date: DateParts;
   recorded_given_name: string;
   recorded_surname: string;
-  recorded_birth_date: string;
+  recorded_birth_date: DateParts;
   recorded_birth_place: string;
   notes: string;
   is_verified: boolean;
@@ -36,11 +37,11 @@ export function documentFormValues(
     document_type: doc?.document_type ?? '',
     title: doc?.title ?? '',
     issuing_authority: doc?.issuing_authority ?? '',
-    issue_date: doc?.issue_date ?? '',
-    recorded_date: doc?.recorded_date ?? '',
+    issue_date: dateParts(doc?.issue_date),
+    registration_date: dateParts(doc?.registration_date),
     recorded_given_name: doc?.recorded_given_name ?? '',
     recorded_surname: doc?.recorded_surname ?? '',
-    recorded_birth_date: doc?.recorded_birth_date ?? '',
+    recorded_birth_date: dateParts(doc?.recorded_birth_date),
     recorded_birth_place: doc?.recorded_birth_place ?? '',
     notes: doc?.notes ?? '',
     is_verified: doc?.is_verified ?? false,
@@ -59,11 +60,11 @@ export function documentInput(v: DocumentFormValues, isNew: boolean): DocumentIn
     document_type: v.document_type,
     title: v.title,
     issuing_authority: v.issuing_authority || null,
-    issue_date: v.issue_date || null,
-    recorded_date: v.recorded_date || null,
+    issue_date: partialDate(v.issue_date),
+    registration_date: partialDate(v.registration_date),
     recorded_given_name: v.recorded_given_name || null,
     recorded_surname: v.recorded_surname || null,
-    recorded_birth_date: v.recorded_birth_date || null,
+    recorded_birth_date: partialDate(v.recorded_birth_date),
     recorded_birth_place: v.recorded_birth_place || null,
     notes: v.notes || null,
     is_verified: v.is_verified,

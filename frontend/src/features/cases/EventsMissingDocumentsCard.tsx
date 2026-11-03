@@ -7,6 +7,7 @@ import type { LifeEvent } from '../../api/lifeevents';
 import type { Person } from '../../api/people';
 import { eventTypeLabel } from '../life-events/options';
 import { personName } from '../people/personName';
+import { formatQualifiedDate } from '../../lib/dates';
 
 interface EventsMissingDocumentsCardProps {
   events: LifeEvent[];
@@ -32,7 +33,7 @@ export default function EventsMissingDocumentsCard({ events, people }: EventsMis
               </ThemeIcon>
               <Text size="sm">
                 {personName(e.person_id, people)}: {eventTypeLabel(e.event_type)}
-                {e.event_date ? ` — ${e.event_date}` : ''}
+                {e.event_date ? ` — ${formatQualifiedDate(e.event_date)}` : ''}
               </Text>
             </Group>
           </List.Item>

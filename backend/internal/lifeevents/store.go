@@ -46,8 +46,10 @@ func (s *store) ListLifeEvents(ctx context.Context, caseID string) ([]LifeEvent,
 		SELECT
 			le.id::text, le.case_id::text, le.person_id::text,
 			le.event_type::text,
-			le.event_date::text, le.event_place,
-			le.spouse_name, le.spouse_birth_date::text, le.spouse_birth_place,
+			le.event_date, le.event_date_qualifier::text, le.event_date_end, le.event_place,
+			le.spouse_name,
+			le.spouse_birth_date, le.spouse_birth_date_qualifier::text, le.spouse_birth_date_end,
+			le.spouse_birth_place,
 			le.notes,
 			COUNT(d.id) > 0 AS has_documents,
 			le.version, le.created_at, le.updated_at
@@ -55,7 +57,7 @@ func (s *store) ListLifeEvents(ctx context.Context, caseID string) ([]LifeEvent,
 		LEFT JOIN active_documents d ON d.life_event_id = le.id
 		WHERE le.id IN (SELECT id FROM active_life_events WHERE case_id = $1)
 		GROUP BY le.id
-		ORDER BY le.event_date ASC NULLS LAST, le.created_at ASC, le.id ASC`,
+		ORDER BY le.event_date COLLATE "C" ASC NULLS LAST, le.created_at ASC, le.id ASC`,
 		caseID)
 	if err != nil {
 		return nil, fmt.Errorf("query life events: %w", err)
@@ -82,15 +84,17 @@ func (s *store) CreateLifeEvent(ctx context.Context, caseID, personID, eventType
 	var id string
 	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		INSERT INTO life_events
-			(case_id, person_id, event_type, event_date, event_place,
-			 spouse_name, spouse_birth_date, spouse_birth_place, notes)
-		VALUES ($1, $2, $3::life_event_type, $4::date, $5, $6, $7::date, $8, $9)
+			(case_id, person_id, event_type,
+			 event_date, event_date_qualifier, event_date_end, event_place,
+			 spouse_name, spouse_birth_date, spouse_birth_date_qualifier, spouse_birth_date_end,
+			 spouse_birth_place, notes)
+		VALUES ($1, $2, $3::life_event_type, $4, $5::date_qualifier, $6, $7, $8, $9, $10::date_qualifier, $11, $12, $13)
 		RETURNING id::text`,
 		caseID, personID, eventType,
-		nullToSQL(input.EventDate),
+		dateText(input.EventDate), dateQualifier(input.EventDate), dateEnd(input.EventDate),
 		nullToSQL(input.EventPlace),
 		nullToSQL(input.SpouseName),
-		nullToSQL(input.SpouseBirthDate),
+		dateText(input.SpouseBirthDate), dateQualifier(input.SpouseBirthDate), dateEnd(input.SpouseBirthDate),
 		nullToSQL(input.SpouseBirthPlace),
 		nullToSQL(input.Notes),
 	).Scan(&id)
@@ -105,21 +109,25 @@ func (s *store) UpdateLifeEvent(ctx context.Context, caseID, eventID string, inp
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE life_events SET
 			event_type        = COALESCE($3::life_event_type, event_type),
-			person_id         = COALESCE($16::uuid, person_id),
-			event_date        = CASE WHEN $4  THEN $5::date  ELSE event_date        END,
-			event_place       = CASE WHEN $6  THEN $7        ELSE event_place       END,
-			spouse_name       = CASE WHEN $8  THEN $9        ELSE spouse_name       END,
-			spouse_birth_date = CASE WHEN $10 THEN $11::date ELSE spouse_birth_date END,
-			spouse_birth_place= CASE WHEN $12 THEN $13       ELSE spouse_birth_place END,
-			notes             = CASE WHEN $14 THEN $15       ELSE notes             END,
-			updated_at        = NOW(), version = version + 1
+			person_id         = COALESCE($20::uuid, person_id),
+			event_date                  = CASE WHEN $4  THEN $5                   ELSE event_date                  END,
+			event_date_qualifier        = CASE WHEN $4  THEN $6::date_qualifier   ELSE event_date_qualifier        END,
+			event_date_end              = CASE WHEN $4  THEN $7                   ELSE event_date_end              END,
+			event_place                 = CASE WHEN $8  THEN $9                   ELSE event_place                 END,
+			spouse_name                 = CASE WHEN $10 THEN $11                  ELSE spouse_name                 END,
+			spouse_birth_date           = CASE WHEN $12 THEN $13                  ELSE spouse_birth_date           END,
+			spouse_birth_date_qualifier = CASE WHEN $12 THEN $14::date_qualifier  ELSE spouse_birth_date_qualifier END,
+			spouse_birth_date_end       = CASE WHEN $12 THEN $15                  ELSE spouse_birth_date_end       END,
+			spouse_birth_place          = CASE WHEN $16 THEN $17                  ELSE spouse_birth_place          END,
+			notes                       = CASE WHEN $18 THEN $19                  ELSE notes                       END,
+			updated_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		eventID, caseID,
 		input.EventType,
-		input.EventDate.Set, nullToSQL(input.EventDate),
+		input.EventDate.Set, dateText(input.EventDate), dateQualifier(input.EventDate), dateEnd(input.EventDate),
 		input.EventPlace.Set, nullToSQL(input.EventPlace),
 		input.SpouseName.Set, nullToSQL(input.SpouseName),
-		input.SpouseBirthDate.Set, nullToSQL(input.SpouseBirthDate),
+		input.SpouseBirthDate.Set, dateText(input.SpouseBirthDate), dateQualifier(input.SpouseBirthDate), dateEnd(input.SpouseBirthDate),
 		input.SpouseBirthPlace.Set, nullToSQL(input.SpouseBirthPlace),
 		input.Notes.Set, nullToSQL(input.Notes),
 		input.PersonID,
@@ -164,8 +172,10 @@ func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*Life
 		SELECT
 			le.id::text, le.case_id::text, le.person_id::text,
 			le.event_type::text,
-			le.event_date::text, le.event_place,
-			le.spouse_name, le.spouse_birth_date::text, le.spouse_birth_place,
+			le.event_date, le.event_date_qualifier::text, le.event_date_end, le.event_place,
+			le.spouse_name,
+			le.spouse_birth_date, le.spouse_birth_date_qualifier::text, le.spouse_birth_date_end,
+			le.spouse_birth_place,
 			le.notes,
 			COUNT(d.id) > 0 AS has_documents,
 			le.version, le.created_at, le.updated_at
@@ -189,30 +199,29 @@ func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*Life
 // to populate a LifeEvent, handling all nullable fields.
 func scanLifeEvent(scan func(...any) error) (*LifeEvent, error) {
 	var le LifeEvent
-	var eventDate, eventPlace, spouseName, spouseBirthDate, spouseBirthPlace, notes sql.NullString
+	var eventPlace, spouseName, spouseBirthPlace, notes sql.NullString
+	var eventDate, spouseBirthDate [3]sql.NullString
 	if err := scan(
 		&le.ID, &le.CaseID, &le.PersonID,
 		&le.EventType,
-		&eventDate, &eventPlace,
-		&spouseName, &spouseBirthDate, &spouseBirthPlace,
+		&eventDate[0], &eventDate[1], &eventDate[2], &eventPlace,
+		&spouseName,
+		&spouseBirthDate[0], &spouseBirthDate[1], &spouseBirthDate[2],
+		&spouseBirthPlace,
 		&notes,
 		&le.HasDocuments,
 		&le.Version, &le.CreatedAt, &le.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
-	if eventDate.Valid {
-		le.EventDate = &eventDate.String
-	}
+	le.EventDate = platform.ScanQualifiedDate(eventDate[0], eventDate[1], eventDate[2])
 	if eventPlace.Valid {
 		le.EventPlace = &eventPlace.String
 	}
 	if spouseName.Valid {
 		le.SpouseName = &spouseName.String
 	}
-	if spouseBirthDate.Valid {
-		le.SpouseBirthDate = &spouseBirthDate.String
-	}
+	le.SpouseBirthDate = platform.ScanQualifiedDate(spouseBirthDate[0], spouseBirthDate[1], spouseBirthDate[2])
 	if spouseBirthPlace.Valid {
 		le.SpouseBirthPlace = &spouseBirthPlace.String
 	}
@@ -224,6 +233,23 @@ func scanLifeEvent(scan func(...any) error) (*LifeEvent, error) {
 
 func nullToSQL(f platform.NullString) sql.NullString {
 	return sql.NullString{String: f.Value, Valid: f.Valid}
+}
+
+// dateText, dateQualifier and dateEnd are the three columns a qualified date
+// is stored in. All three are null when the date is.
+func dateText(n platform.NullQualifiedDate) sql.NullString {
+	return sql.NullString{String: n.Date.Value, Valid: n.Valid}
+}
+
+func dateQualifier(n platform.NullQualifiedDate) sql.NullString {
+	return sql.NullString{String: n.Date.Qualifier, Valid: n.Valid}
+}
+
+func dateEnd(n platform.NullQualifiedDate) sql.NullString {
+	if !n.Valid || n.Date.End == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: *n.Date.End, Valid: true}
 }
 
 // RequireActive returns the event's person, or ErrNotFound unless the event is

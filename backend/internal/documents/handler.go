@@ -51,7 +51,7 @@ type documentFields struct {
 	Title              *string             `json:"title"`
 	IssuingAuthority   platform.NullString `json:"issuing_authority"`
 	IssueDate          platform.NullString `json:"issue_date"`
-	RecordedDate       platform.NullString `json:"recorded_date"`
+	RegistrationDate   platform.NullString `json:"registration_date"`
 	RecordedGivenName  platform.NullString `json:"recorded_given_name"`
 	RecordedSurname    platform.NullString `json:"recorded_surname"`
 	RecordedBirthDate  platform.NullString `json:"recorded_birth_date"`
@@ -69,15 +69,15 @@ func (f *documentFields) validate(v *platform.Validator) {
 	if f.LifeEventID.Set && f.LifeEventID.Valid {
 		v.ID("life_event_id", f.LifeEventID.Value)
 	}
-	v.Date("issue_date", f.IssueDate)
-	v.Date("recorded_date", f.RecordedDate)
-	v.Date("recorded_birth_date", f.RecordedBirthDate)
+	v.PartialDate("issue_date", f.IssueDate)
+	v.PartialDate("registration_date", f.RegistrationDate)
+	v.PartialDate("recorded_birth_date", f.RecordedBirthDate)
 }
 
 func (f *documentFields) input() UpdateDocumentInput {
 	return UpdateDocumentInput{
 		LifeEventID: f.LifeEventID, DocumentType: f.DocumentType, Title: f.Title,
-		IssuingAuthority: f.IssuingAuthority, IssueDate: f.IssueDate, RecordedDate: f.RecordedDate,
+		IssuingAuthority: f.IssuingAuthority, IssueDate: f.IssueDate, RegistrationDate: f.RegistrationDate,
 		RecordedGivenName: f.RecordedGivenName, RecordedSurname: f.RecordedSurname,
 		RecordedBirthDate: f.RecordedBirthDate, RecordedBirthPlace: f.RecordedBirthPlace,
 		Notes: f.Notes, IsVerified: f.IsVerified,

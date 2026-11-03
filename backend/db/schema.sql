@@ -82,6 +82,19 @@ CREATE TYPE public.claim_line_status AS ENUM (
 
 
 --
+-- Name: date_qualifier; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.date_qualifier AS ENUM (
+    'exact',
+    'about',
+    'before',
+    'after',
+    'between'
+);
+
+
+--
 -- Name: document_phase; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -130,6 +143,15 @@ CREATE TYPE public.progress_bucket AS ENUM (
     'in_progress',
     'complete'
 );
+
+
+--
+-- Name: is_partial_date(text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.is_partial_date(d text) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    RETURN (d ~ '^[0-9]{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12][0-9]|3[01]))?)?$'::text);
 
 
 SET default_tablespace = '';
@@ -233,16 +255,26 @@ CREATE TABLE public.life_events (
     case_id uuid NOT NULL,
     person_id uuid NOT NULL,
     event_type public.life_event_type NOT NULL,
-    event_date date,
+    event_date text,
     event_place text,
     spouse_name text,
-    spouse_birth_date date,
+    spouse_birth_date text,
     spouse_birth_place text,
     notes text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
-    version integer DEFAULT 1 NOT NULL
+    version integer DEFAULT 1 NOT NULL,
+    event_date_qualifier public.date_qualifier,
+    event_date_end text,
+    spouse_birth_date_qualifier public.date_qualifier,
+    spouse_birth_date_end text,
+    CONSTRAINT event_date_form CHECK ((public.is_partial_date(event_date) AND public.is_partial_date(event_date_end))),
+    CONSTRAINT event_date_qualified CHECK (((event_date IS NULL) = (event_date_qualifier IS NULL))),
+    CONSTRAINT event_date_range CHECK (((event_date_end IS NOT NULL) = COALESCE((event_date_qualifier = 'between'::public.date_qualifier), false))),
+    CONSTRAINT spouse_birth_date_form CHECK ((public.is_partial_date(spouse_birth_date) AND public.is_partial_date(spouse_birth_date_end))),
+    CONSTRAINT spouse_birth_date_qualified CHECK (((spouse_birth_date IS NULL) = (spouse_birth_date_qualifier IS NULL))),
+    CONSTRAINT spouse_birth_date_range CHECK (((spouse_birth_date_end IS NOT NULL) = COALESCE((spouse_birth_date_qualifier = 'between'::public.date_qualifier), false)))
 );
 
 
@@ -271,11 +303,11 @@ CREATE TABLE public.documents (
     document_type public.document_type NOT NULL,
     title text NOT NULL,
     issuing_authority text,
-    issue_date date,
-    recorded_date date,
+    issue_date text,
+    registration_date text,
     recorded_given_name text,
     recorded_surname text,
-    recorded_birth_date date,
+    recorded_birth_date text,
     recorded_birth_place text,
     is_verified boolean DEFAULT false NOT NULL,
     verified_at timestamp with time zone,
@@ -287,7 +319,8 @@ CREATE TABLE public.documents (
     amendment_status_id uuid NOT NULL,
     apostille_status_id uuid NOT NULL,
     translation_status_id uuid NOT NULL,
-    version integer DEFAULT 1 NOT NULL
+    version integer DEFAULT 1 NOT NULL,
+    CONSTRAINT document_dates_form CHECK ((public.is_partial_date(issue_date) AND public.is_partial_date(registration_date) AND public.is_partial_date(recorded_birth_date)))
 );
 
 

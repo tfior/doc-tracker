@@ -3,16 +3,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { get, post, patch, del, type Items } from './client';
+import type { QualifiedDate } from './dates';
 
 export interface LifeEvent {
   id: string;
   case_id: string;
   person_id: string;
   event_type: string;
-  event_date: string | null;
+  event_date: QualifiedDate | null;
   event_place: string | null;
   spouse_name: string | null;
-  spouse_birth_date: string | null;
+  spouse_birth_date: QualifiedDate | null;
   spouse_birth_place: string | null;
   notes: string | null;
   has_documents: boolean;
@@ -25,10 +26,10 @@ export interface LifeEventInput {
   /** Changing the person moves the event's documents with it. */
   person_id?: string;
   event_type?: string;
-  event_date?: string | null;
+  event_date?: QualifiedDate | null;
   event_place?: string | null;
   spouse_name?: string | null;
-  spouse_birth_date?: string | null;
+  spouse_birth_date?: QualifiedDate | null;
   spouse_birth_place?: string | null;
   notes?: string | null;
 }
