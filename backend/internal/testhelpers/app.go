@@ -48,6 +48,12 @@ func NewAppClient(t *testing.T, db *sql.DB) *AppClient {
 	return c
 }
 
+// NewAnonymousClient returns a client that is not logged in, for requests such
+// as logging in.
+func NewAnonymousClient(db *sql.DB) *AppClient {
+	return &AppClient{handler: app.NewHandler(db)}
+}
+
 // Do sends a request with an optional JSON body and returns the recorded response.
 func (c *AppClient) Do(method, path string, body any) *httptest.ResponseRecorder {
 	var buf bytes.Buffer

@@ -18,6 +18,7 @@ type Store interface {
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	GetByID(ctx context.Context, id string) (*User, error)
 	Create(ctx context.Context, email, firstName, lastName, passwordHash string) (*User, error)
+	SetPasswordHash(ctx context.Context, id, passwordHash string) error
 }
 
 type store struct {
@@ -74,4 +75,13 @@ func (s *store) Create(ctx context.Context, email, firstName, lastName, password
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 	return u, nil
+}
+
+func (s *store) SetPasswordHash(ctx context.Context, id, passwordHash string) error {
+	result, err := platform.Conn(ctx, s.db).ExecContext(ctx,
+		`UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1`, id, passwordHash)
+	if err != nil {
+		return fmt.Errorf("set password hash: %w", err)
+	}
+	return platform.RequireOneRow(result, ErrNotFound)
 }

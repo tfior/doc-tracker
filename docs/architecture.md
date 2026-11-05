@@ -40,7 +40,7 @@ doc-tracker/
 │   │   │   ├── documents/
 │   │   │   ├── trash/
 │   │   │   └── exports/         # (planned)
-│   │   ├── components/          # shared UI only: error messages, delete confirmation, date field, error boundary, page not found
+│   │   ├── components/          # shared UI only: error messages, delete confirmation, date inputs, error boundary, page not found
 │   │   ├── api/                 # typed API client
 │   │   └── lib/                 # pure utilities, no business logic
 │   ├── index.html
@@ -52,6 +52,7 @@ doc-tracker/
 │   │   ├── server/
 │   │   │   └── main.go          # starts the server
 │   │   ├── create-user/         # CLI: create a user
+│   │   ├── schema-db/           # CLI: migrate a scratch database for make schema
 │   │   └── seed/                # CLI: load sample cases
 │   ├── internal/
 │   │   ├── app/                 # assembles modules into the HTTP handler; used by the server and tests
@@ -67,6 +68,7 @@ doc-tracker/
 │   │   ├── trash/
 │   │   ├── storage/             # (planned)
 │   │   ├── exports/             # (planned)
+│   │   ├── seed/                # sample cases for development, written through the API as the locked Seed Data user
 │   │   └── testhelpers/         # test database setup shared by integration tests
 │   ├── db/
 │   │   ├── migrations/          # numbered SQL files, e.g. 001_initial_schema.up.sql

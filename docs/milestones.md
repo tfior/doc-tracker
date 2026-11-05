@@ -6,9 +6,9 @@ The design docs (`domain-model.md`, `architecture.md`, `api-conventions.md`) des
 |---|---|---|
 | 1 | A case exists and can be viewed | Done |
 | 2 | A case can be created and managed | Done |
-| 3 | Integrity: the data can be trusted | Next |
-| 4 | Dates and life events | |
-| 5 | Readiness | |
+| 3 | Integrity: the data can be trusted | Done |
+| 4 | Dates and life events | Done |
+| 5 | Readiness | Next |
 | 6 | Cases and applications | |
 | 7 | Deployable — **MVP complete** | |
 | 8 | Files | After the MVP |
@@ -83,7 +83,7 @@ Authentication and full write operations. After this milestone the app is a func
 - A user can add, edit, and remove life events
 - A user can add, edit, and remove documents (metadata only — no file upload yet)
 - A user can manually transition a document's status
-- A user can create and update claim lines (root person + status + notes; explicit path through the lineage graph deferred post-MVP)
+- A user can create and update claim lines (root ancestor + status + notes; explicit path through the lineage graph deferred post-MVP)
 - Deleted entities go to a trash view; trashed entities are frozen until restored or permanently deleted
 - A user can restore a trashed entity or permanently delete it immediately
 - A user can reassign a LifeEvent to a different Person within the same Case
@@ -224,14 +224,14 @@ API
 - [x] `spouse_person_id` on marriage events; a person's life events include marriages where they are the linked spouse
 - [x] A shared marriage survives the deletion of one spouse
 - [x] Spouse and divorce fields are refused on events that are not marriages
-- [ ] Seed data: the Rossi case with its line marked ineligible, and a second case through a grandparent marked eligible; the seed goes through the services, not raw SQL
+- [x] Seed data: the Rossi case with its line marked ineligible, and a second case through a grandparent marked eligible; the seed goes through the services, not raw SQL
 
 ### Frontend
 
 - [x] A shared date input in `components/`: a qualifier and separate year, month and day fields, with month and day optional and impossible days not offered
 - [x] The person form edits birth and death through their life events
 - [x] The marriage form can link the spouse to a person in the case, and has a "Marriage ended in divorce" section
-- [ ] Wording: "Root Ancestor", "Registration date", and the "As recorded in document" heading
+- [x] Wording: "Root Ancestor", "Registration date", and the "As recorded in document" heading
 - [x] Every date is displayed in words, day first: "4 March 1890", "March 1890", "about 1890"
 
 ---

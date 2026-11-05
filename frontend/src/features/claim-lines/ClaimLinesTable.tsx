@@ -20,7 +20,7 @@ export default function ClaimLinesTable({ lines, people, onEdit, onDelete }: Cla
     <Table striped highlightOnHover withTableBorder>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>Root Person</Table.Th>
+          <Table.Th>Root Ancestor</Table.Th>
           <Table.Th>Status</Table.Th>
           <Table.Th>Notes</Table.Th>
           <Table.Th />

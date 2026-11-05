@@ -34,6 +34,26 @@ func (s *Service) Create(ctx context.Context, email, firstName, lastName, passwo
 	return s.store.Create(ctx, email, firstName, lastName, string(hash))
 }
 
+// SetPassword replaces a user's password.
+func (s *Service) SetPassword(ctx context.Context, id, password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return s.store.SetPasswordHash(ctx, id, string(hash))
+}
+
+// LockedPasswordHash is stored in place of a password hash to lock an account.
+// It is not a well-formed bcrypt hash, so CheckPassword rejects every password
+// against it, including "!" itself.
+const LockedPasswordHash = "!"
+
+// Lock stops any new login to an account, until a password is set again.
+// Sessions already open are not ended.
+func (s *Service) Lock(ctx context.Context, id string) error {
+	return s.store.SetPasswordHash(ctx, id, LockedPasswordHash)
+}
+
 func (s *Service) CheckPassword(passwordHash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)) == nil
 }
