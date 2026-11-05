@@ -249,7 +249,7 @@ The `apostille` phase is labelled "Apostille / Legalization" in the UI. It also 
 ### Document
 A specific official record belonging to a Person, optionally grouped under a LifeEvent. `recorded_*` fields capture data exactly as recorded in the document, as shown on the current submission file, in the original document's original language only. Translations and apostilles do not contribute to recorded metadata. In the UI these fields sit under the heading "As recorded in document".
 
-`details_checked` is a user's attestation that they compared the recorded details against the scan: the `recorded_*` fields and the Document's DocumentNamedPerson entries. It is labelled "Details checked against scan" in the UI. It is set by a user, independently of phase statuses, and the system records who set it, when, and which submission file was current at the time.
+`details_checked` is a user's attestation that they compared the recorded details against the scan: the `recorded_*` fields and the Document's DocumentNamedPerson entries. It is labelled "Details checked against scan" in the UI. It is set by a user, independently of phase statuses. When it is set, the system records who set it, when, and which submission file was current at the time; clearing it clears these too. A save that changes any `recorded_*` field clears it, unless the same save sets it, which records a new check.
 
 Each of the four phases carries three things: its status, the date it entered that status, and an optional reference such as an order or case number.
 
@@ -264,16 +264,16 @@ A Document may be reassigned to a different LifeEvent within the same Case, incl
 | person_id | uuid | FK → Person; updated atomically when reassigned to an event under a different Person |
 | life_event_id | uuid? | FK → LifeEvent; null = ungrouped; reassignable within same Case |
 | official_copy_status_id | uuid | FK → DocumentStatus (phase=official_copy or any); default: Not Started |
-| official_copy_status_since | date | the date the phase entered its current status; set automatically, correctable |
+| official_copy_status_since | timestamp | when the phase entered its current status; set automatically, correctable |
 | official_copy_reference | text? | order, case, or tracking number for this phase's request |
 | amendment_status_id | uuid | FK → DocumentStatus (phase=amendment or any); default: Unknown |
-| amendment_status_since | date | the date the phase entered its current status; set automatically, correctable |
+| amendment_status_since | timestamp | when the phase entered its current status; set automatically, correctable |
 | amendment_reference | text? | order, case, or tracking number for this phase's request |
 | apostille_status_id | uuid | FK → DocumentStatus (phase=apostille or any); default: Not Started |
-| apostille_status_since | date | the date the phase entered its current status; set automatically, correctable |
+| apostille_status_since | timestamp | when the phase entered its current status; set automatically, correctable |
 | apostille_reference | text? | order, case, or tracking number for this phase's request |
 | translation_status_id | uuid | FK → DocumentStatus (phase=translation or any); default: Not Started |
-| translation_status_since | date | the date the phase entered its current status; set automatically, correctable |
+| translation_status_since | timestamp | when the phase entered its current status; set automatically, correctable |
 | translation_reference | text? | order, case, or tracking number for this phase's request |
 | document_type | enum | birth_certificate, marriage_certificate, naturalization, death_certificate, non_naturalization_certificate, divorce_record, court_order, other |
 | title | text | |
@@ -350,7 +350,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 ### General
 
 1. `recorded_*` fields always reflect the original document in its original language. Never populate from translations or apostilles.
-2. `Document.details_checked` is set by a user. The only system action that clears it is the upload of a new submission file that the uploader flags as changing the recorded details.
+2. `Document.details_checked` is set by a user. It is cleared by the system only when the recorded details may no longer match the scan: by a save that changes a `recorded_*` field without setting the check again, and by the upload of a new submission file that the uploader flags as changing the recorded details.
 3. A divorce is recorded on the marriage LifeEvent it ended (`divorce_date`, `divorce_place`); there is no divorce event type.
 4. PersonRelationship is parent-child only.
 5. Person records are scoped per case for MVP.
@@ -396,7 +396,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 30. A `phase` of `any` on a DocumentStatus means the status appears in all four phase pickers.
 31. System DocumentStatus entries cannot be edited or deleted by users.
 32. User-defined DocumentStatus entries are global (shared across all cases). The admin UI for creating them is deferred post-MVP.
-33. Each phase records the date it entered its current status. The date is set to the current day whenever the status changes, and a user may correct it, for example to back-date a request entered late. How long a phase has been in its status is derived from it.
+33. Each phase records when it entered its current status. This is set to the current time whenever the status changes, and a user may correct it, for example to back-date a request entered late; a correction may not be in the future. How long a phase has been in its status is derived from it.
 34. Each phase has an optional free-text reference for the order, case, or tracking number of its request.
 
 ### Readiness

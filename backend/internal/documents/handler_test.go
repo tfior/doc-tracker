@@ -113,8 +113,8 @@ func TestCreateDocument_Valid(t *testing.T) {
 	assert.Equal(t, p.ID, got.PersonID)
 	assert.Equal(t, "birth_certificate", got.DocumentType)
 	assert.Equal(t, "Giuseppe Rossi Birth Certificate", got.Title)
-	assert.False(t, got.IsVerified)
-	assert.Nil(t, got.VerifiedAt)
+	assert.False(t, got.DetailsChecked)
+	assert.Nil(t, got.DetailsCheckedAt)
 	assert.Nil(t, got.LifeEventID)
 	// Phase status defaults.
 	assert.Equal(t, "Not Started", got.OfficialCopyStatus.Label)
@@ -321,33 +321,6 @@ func TestUpdateDocument_ClearOptionalField(t *testing.T) {
 	var got documents.Document
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
 	assert.Nil(t, got.RecordedGivenName)
-}
-
-func TestUpdateDocument_IsVerified(t *testing.T) {
-	env := newTestEnv(t)
-	c := env.createCase(t)
-	p := env.createPerson(t, c.ID)
-	d := env.createDocument(t, c.ID, p.ID, "birth_certificate", "Some Doc")
-
-	// Set verified.
-	rec := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, map[string]any{
-		"is_verified": true,
-	})
-	assert.Equal(t, http.StatusOK, rec.Code)
-	var verified documents.Document
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&verified))
-	assert.True(t, verified.IsVerified)
-	assert.NotNil(t, verified.VerifiedAt)
-
-	// Clear verified.
-	rec2 := env.do("PATCH", "/api/v1/cases/"+c.ID+"/documents/"+d.ID, map[string]any{
-		"is_verified": false,
-	})
-	assert.Equal(t, http.StatusOK, rec2.Code)
-	var unverified documents.Document
-	require.NoError(t, json.NewDecoder(rec2.Body).Decode(&unverified))
-	assert.False(t, unverified.IsVerified)
-	assert.Nil(t, unverified.VerifiedAt)
 }
 
 func TestUpdateDocument_InvalidDocumentType(t *testing.T) {

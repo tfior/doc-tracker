@@ -249,19 +249,19 @@ After this milestone the app answers "what is still outstanding on this case?".
 
 ### Backend
 
-- [ ] `is_verified` becomes `details_checked`, recording who and when; setting it on create works; its timestamp no longer changes on unrelated saves
+- [x] `is_verified` becomes `details_checked`, recording who and when; setting it on create works; its timestamp no longer changes on unrelated saves; a change to the recorded details clears it
 - [ ] Readiness on every document: status, the stage it is waiting on, and reasons
 - [ ] Progress counts on every case, in the list and the detail
-- [ ] A since date on each phase, set automatically and correctable; a reference on each phase
-- [ ] The `for_submission` flag
-- [ ] Document types: non-naturalization certificate, divorce record, court order
+- [x] A since date on each phase, set automatically and correctable; a reference on each phase
+- [x] The `for_submission` flag
+- [x] Document types: non-naturalization certificate, divorce record, court order
 - [ ] The age of a document's current copy
 
 ### Frontend
 
 - [ ] Documents table: readiness with reasons, and time in the current status; the phase labelled "Apostille / Legalization"
 - [ ] Case overview: progress summary and the outstanding list by stage, sortable by time waiting; every row names its person
-- [ ] Document form: "Details checked against scan" with who and when; since date and reference per phase; "for submission"
+- [x] Document form: "Details checked against scan" with who and when; since date and reference per phase; "for submission"
 
 ---
 

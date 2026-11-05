@@ -11,7 +11,7 @@ import {
 } from '../../api/queries';
 import { changedFields } from '../../lib/changes';
 import DocumentForm from './DocumentForm';
-import { documentFormValues, documentInput, type DocumentFormValues } from './documentFormValues';
+import { documentFormValues, documentInput, RECORDED_FIELDS, type DocumentFormValues } from './documentFormValues';
 
 interface DocumentFormModalProps {
   caseId: string;
@@ -48,6 +48,9 @@ function DocumentFormBody({ caseId, record, onClose, lockedPersonId, lockedLifeE
     mutationFn: async (values: DocumentFormValues) => {
       if (!base) return createDocument(caseId, documentInput(values, true));
       const input = changedFields(documentInput(documentFormValues(base), false), documentInput(values, false));
+      // A changed recorded detail clears the check unless the save sets it
+      // again, so a box ticked again after the edit must be sent.
+      if (values.details_checked && RECORDED_FIELDS.some((f) => f in input)) input.details_checked = true;
       if (Object.keys(input).length === 0) return base;
       return updateDocument(caseId, base.id, base.version, input);
     },
@@ -69,6 +72,9 @@ function DocumentFormBody({ caseId, record, onClose, lockedPersonId, lockedLifeE
     <DocumentForm
       key={base?.version ?? 'new'}
       initial={documentFormValues(base, defaults)}
+      checked={base?.details_checked && base.details_checked_at
+        ? { by: base.details_checked_by?.name ?? null, at: base.details_checked_at }
+        : null}
       isNew={!base}
       people={people}
       lifeEvents={lifeEvents}

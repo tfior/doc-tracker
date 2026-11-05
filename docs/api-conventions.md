@@ -133,7 +133,7 @@ Responses include every derived value the interface needs. Clients do not recomp
   }
   ```
 
-- Every Document also carries, for each phase, the date it entered its current status; the age of its current copy, when the issue date allows; and the number of copies required.
+- Every Document also carries, for each phase, how long it has been in its current status; the age of its current copy, when the issue date allows; and the number of copies required.
 - Every Application carries its Documents, in packet order, and its status with the number ready out of the total.
 - Every Case carries `progress`, in both the case list and the case detail: the count of its Documents in each readiness status.
 
@@ -142,6 +142,10 @@ Responses include every derived value the interface needs. Clients do not recomp
   ```
 
 - A recorded age is returned with the birth window it implies, when that can be calculated.
+
+### User references
+
+A field naming a user is an object with the user's ID and display name, read when the response is built: `"details_checked_by": { "id": "…", "name": "Tony Fiorini" }`. It is `null` when no user is recorded. Requests that set such a field never send it; the server records the user making the request.
 
 ## Error Shape
 
@@ -239,6 +243,7 @@ Dates that describe people, events, and documents are not timestamps. They may b
 - All timestamps are in UTC, formatted as RFC 3339 (`2026-04-11T10:00:00Z`)
 - Request bodies may omit timezone offset — the server always interprets as UTC
 - `created_at` and `updated_at` are set server-side and never accepted from the client
+- Clients show timestamps in the user's local time zone. A timestamp a user enters as a date, such as a phase's since date, is sent as the start of that day in their local time zone.
 
 ## Naming
 

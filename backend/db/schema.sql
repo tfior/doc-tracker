@@ -116,7 +116,10 @@ CREATE TYPE public.document_type AS ENUM (
     'marriage_certificate',
     'naturalization',
     'death_certificate',
-    'other'
+    'other',
+    'non_naturalization_certificate',
+    'divorce_record',
+    'court_order'
 );
 
 
@@ -321,8 +324,8 @@ CREATE TABLE public.documents (
     recorded_surname text,
     recorded_birth_date text,
     recorded_birth_place text,
-    is_verified boolean DEFAULT false NOT NULL,
-    verified_at timestamp with time zone,
+    details_checked boolean DEFAULT false NOT NULL,
+    details_checked_at timestamp with time zone,
     notes text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -332,6 +335,17 @@ CREATE TABLE public.documents (
     apostille_status_id uuid NOT NULL,
     translation_status_id uuid NOT NULL,
     version integer DEFAULT 1 NOT NULL,
+    details_checked_by uuid,
+    official_copy_status_since timestamp with time zone DEFAULT now() NOT NULL,
+    amendment_status_since timestamp with time zone DEFAULT now() NOT NULL,
+    apostille_status_since timestamp with time zone DEFAULT now() NOT NULL,
+    translation_status_since timestamp with time zone DEFAULT now() NOT NULL,
+    official_copy_reference text,
+    amendment_reference text,
+    apostille_reference text,
+    translation_reference text,
+    for_submission boolean DEFAULT true NOT NULL,
+    CONSTRAINT document_check_recorded CHECK ((details_checked OR ((details_checked_at IS NULL) AND (details_checked_by IS NULL)))),
     CONSTRAINT document_dates_form CHECK ((public.is_partial_date(issue_date) AND public.is_partial_date(registration_date) AND public.is_partial_date(recorded_birth_date)))
 );
 
@@ -780,6 +794,14 @@ ALTER TABLE ONLY public.documents
 
 ALTER TABLE ONLY public.documents
     ADD CONSTRAINT documents_case_id_fkey FOREIGN KEY (case_id) REFERENCES public.cases(id) ON DELETE CASCADE;
+
+
+--
+-- Name: documents documents_details_checked_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.documents
+    ADD CONSTRAINT documents_details_checked_by_fkey FOREIGN KEY (details_checked_by) REFERENCES public.users(id) ON DELETE SET NULL;
 
 
 --

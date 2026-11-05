@@ -63,11 +63,10 @@ export default function DocumentsTable({ caseId, documents, people, statuses, on
             <Table.Th style={{ width: '18%' }}>Title</Table.Th>
             <Table.Th style={{ width: '12%' }}>Person</Table.Th>
             <Table.Th style={{ width: '10%' }}>Type</Table.Th>
-            <Table.Th style={{ width: '12%' }}>Official Copy</Table.Th>
-            <Table.Th style={{ width: '12%' }}>Amendment</Table.Th>
-            <Table.Th style={{ width: '12%' }}>Apostille</Table.Th>
-            <Table.Th style={{ width: '12%' }}>Translation</Table.Th>
-            <Table.Th style={{ width: '6%' }}>Verified</Table.Th>
+            {PHASES.map((phase) => (
+              <Table.Th key={phase} style={{ width: '12%' }}>{PHASE_LABELS[phase]}</Table.Th>
+            ))}
+            <Table.Th style={{ width: '6%' }}>Checked</Table.Th>
             <Table.Th style={{ width: '6%' }} />
           </Table.Tr>
         </Table.Thead>
@@ -98,7 +97,7 @@ export default function DocumentsTable({ caseId, documents, people, statuses, on
                   </Table.Td>
                 ))}
                 <Table.Td>
-                  {d.is_verified
+                  {d.details_checked
                     ? <Badge color="green" size="xs">Yes</Badge>
                     : <Badge color="gray" variant="outline" size="xs">No</Badge>}
                 </Table.Td>

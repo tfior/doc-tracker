@@ -104,3 +104,21 @@ export function qualifiedDate(parts: QualifiedDateParts): QualifiedDate | null {
   const end = parts.qualifier === 'between' ? partialDate(parts.end) : null;
   return end === null ? { value, qualifier: parts.qualifier } : { value, qualifier: parts.qualifier, end };
 }
+
+/** A moment's day in the user's time zone, as YYYY-MM-DD for a date input. */
+export function localDay(moment: string | Date): string {
+  const d = new Date(moment);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The start of a YYYY-MM-DD day in the user's time zone, as a timestamp to send. */
+export function startOfLocalDay(day: string): string {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d).toISOString();
+}
+
+/** A timestamp shown as a date in the user's time zone, for example "5 Nov 2026". */
+export function formatTimestampDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
