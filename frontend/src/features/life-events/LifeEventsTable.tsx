@@ -5,7 +5,7 @@
 import { Table, Text, Button, Group, Badge } from '@mantine/core';
 import type { LifeEvent } from '../../api/lifeevents';
 import type { Person } from '../../api/people';
-import { personName } from '../people/personName';
+import { eventPeople } from '../people/personName';
 import { eventTypeLabel } from './options';
 import { formatQualifiedDate } from '../../lib/dates';
 
@@ -39,7 +39,7 @@ export default function LifeEventsTable({ lifeEvents, people, onEdit, onDelete }
         )}
         {lifeEvents.map((e) => (
           <Table.Tr key={e.id} onClick={() => onEdit(e)} style={{ cursor: 'pointer' }}>
-            <Table.Td>{personName(e.person_id, people)}</Table.Td>
+            <Table.Td>{eventPeople(e, people)}</Table.Td>
             <Table.Td>{eventTypeLabel(e.event_type)}</Table.Td>
             <Table.Td>{e.event_date ? formatQualifiedDate(e.event_date) : '—'}</Table.Td>
             <Table.Td>{e.event_place ?? '—'}</Table.Td>

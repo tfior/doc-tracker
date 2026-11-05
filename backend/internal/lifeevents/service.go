@@ -51,12 +51,11 @@ func (s *Service) lockPeople(ctx context.Context, ids []string) error {
 	return s.people.LockPeople(ctx, ids...)
 }
 
-// owner is the person a life event belongs to, as read before the event is
-// locked, and the people a change to it touches.
+// owner is the person a life event belongs to, and its linked spouse, as read
+// before the event is locked, and the people a change to it touches.
 type owner struct {
-	personID, eventType string
-	trashed             bool
-	touched             []string
+	Peeked
+	touched []string
 }
 
 // lockOwner reads which person a life event belongs to and, when it is their
@@ -65,10 +64,10 @@ type owner struct {
 func (s *Service) lockOwner(ctx context.Context, caseID, eventID string) (owner, error) {
 	var o owner
 	var err error
-	if o.personID, o.eventType, o.trashed, err = s.store.Peek(ctx, caseID, eventID); err != nil {
+	if o.Peeked, err = s.store.Peek(ctx, caseID, eventID); err != nil {
 		return o, err
 	}
-	o.touched = vitalPeople("", "", o.personID, o.eventType)
+	o.touched = vitalPeople("", "", o.PersonID, o.EventType)
 	return o, s.lockPeople(ctx, o.touched)
 }
 
@@ -83,6 +82,95 @@ func (s *Service) refuseSecondVital(ctx context.Context, caseID, personID, event
 		return err
 	}
 	return platform.Conflict(refusal, name, eventType)
+}
+
+// Refusals of spouse and divorce details (domain-model.md, rules 22 and 23).
+const (
+	notMarriage   = "Only a marriage can have spouse or divorce details."
+	linkedSpouse  = "A linked spouse's details come from their person record. Clear this field to link them."
+	ownSpouse     = "A person cannot be their own spouse."
+	spouseMissing = "Choose a person in this case who is not in the trash."
+)
+
+// requireSpouse checks, before the event is locked, that a spouse being linked
+// is an active person in the case. It returns platform.ErrNotFound when they
+// are not, for checkMarriage to report.
+func (s *Service) requireSpouse(ctx context.Context, caseID string, input UpdateLifeEventInput) error {
+	if !input.SpousePersonID.Valid {
+		return nil
+	}
+	return s.people.RequireActive(ctx, caseID, input.SpousePersonID.Value)
+}
+
+// checkMarriage checks the spouse and divorce details a write would leave on
+// an event: only a marriage has them; a linked spouse is another active
+// person in the case; and a marriage with a linked spouse has no flat spouse
+// details. before is the event as stored, or nil on create; spouseErr is what
+// requireSpouse returned.
+func checkMarriage(before *LifeEvent, personID, eventType string, input UpdateLifeEventInput, spouseErr error) error {
+	if spouseErr != nil && !errors.Is(spouseErr, platform.ErrNotFound) {
+		return spouseErr
+	}
+	if before == nil {
+		before = &LifeEvent{}
+	}
+	// has reports whether a field holds a value after the write.
+	has := func(stored bool, set, valid bool) bool {
+		if set {
+			return valid
+		}
+		return stored
+	}
+	spouse := ""
+	if before.SpousePersonID != nil {
+		spouse = *before.SpousePersonID
+	}
+	if input.SpousePersonID.Set {
+		spouse = input.SpousePersonID.Value
+	}
+	flat := []struct {
+		field string
+		has   bool
+	}{
+		{"spouse_name", has(before.SpouseName != nil, input.SpouseName.Set, input.SpouseName.Valid)},
+		{"spouse_birth_date", has(before.SpouseBirthDate != nil, input.SpouseBirthDate.Set, input.SpouseBirthDate.Valid)},
+		{"spouse_birth_place", has(before.SpouseBirthPlace != nil, input.SpouseBirthPlace.Set, input.SpouseBirthPlace.Valid)},
+	}
+
+	var v platform.Validator
+	if eventType != "marriage" {
+		if spouse != "" {
+			v.Add("spouse_person_id", "invalid_value", notMarriage)
+		}
+		for _, f := range flat {
+			if f.has {
+				v.Add(f.field, "invalid_value", notMarriage)
+			}
+		}
+		if has(before.DivorceDate != nil, input.DivorceDate.Set, input.DivorceDate.Valid) {
+			v.Add("divorce_date", "invalid_value", notMarriage)
+		}
+		if has(before.DivorcePlace != nil, input.DivorcePlace.Set, input.DivorcePlace.Valid) {
+			v.Add("divorce_place", "invalid_value", notMarriage)
+		}
+		return v.Err()
+	}
+	if spouse != "" {
+		for _, f := range flat {
+			if f.has {
+				v.Add(f.field, "invalid_value", linkedSpouse)
+			}
+		}
+	}
+	switch {
+	case spouse != "" && spouse == personID && input.SpousePersonID.Set:
+		v.Add("spouse_person_id", "invalid_value", ownSpouse)
+	case spouse != "" && spouse == personID:
+		v.Add("person_id", "invalid_value", "A marriage cannot be moved to its own spouse.")
+	case spouseErr != nil:
+		v.Add("spouse_person_id", "invalid_value", spouseMissing)
+	}
+	return v.Err()
 }
 
 // CaseChecker is what this module needs from the cases module.
@@ -160,6 +248,9 @@ func (s *Service) CreateLifeEvent(ctx context.Context, caseID, personID, eventTy
 		if err := s.people.RequireActive(ctx, caseID, personID); err != nil {
 			return platform.MapNotFound(err, ErrNotFound)
 		}
+		if err := checkMarriage(nil, personID, eventType, input, s.requireSpouse(ctx, caseID, input)); err != nil {
+			return err
+		}
 		if err := s.refuseSecondVital(ctx, caseID, personID, eventType, "", "%s already has a %s event."); err != nil {
 			return err
 		}
@@ -228,10 +319,11 @@ func (s *Service) UpdateLifeEvent(ctx context.Context, caseID, eventID string, i
 		// The people the change touches are locked next, before the event.
 		// What the event was is read unlocked to find them; if it changes
 		// before the event is locked, the version check below refuses the write.
-		peekPerson, peekType, _, err := s.store.Peek(ctx, caseID, eventID)
+		peek, err := s.store.Peek(ctx, caseID, eventID)
 		if err != nil {
 			return err
 		}
+		peekPerson, peekType := peek.PersonID, peek.EventType
 		afterPerson, afterType := peekPerson, peekType
 		if input.PersonID != nil {
 			afterPerson = *input.PersonID
@@ -243,6 +335,7 @@ func (s *Service) UpdateLifeEvent(ctx context.Context, caseID, eventID string, i
 		if err := s.lockPeople(ctx, touched); err != nil {
 			return err
 		}
+		spouseErr := s.requireSpouse(ctx, caseID, input)
 		if _, err := s.store.LockActive(ctx, caseID, eventID); err != nil {
 			return err
 		}
@@ -251,6 +344,9 @@ func (s *Service) UpdateLifeEvent(ctx context.Context, caseID, eventID string, i
 			return err
 		}
 		if err := platform.CheckVersion(before.Version, input.Version); err != nil {
+			return err
+		}
+		if err := checkMarriage(before, afterPerson, afterType, input, spouseErr); err != nil {
 			return err
 		}
 		moving := input.PersonID != nil && *input.PersonID != before.PersonID
@@ -313,15 +409,13 @@ func (s *Service) Restore(ctx context.Context, caseID, eventID string) error {
 		if err != nil {
 			return err
 		}
-		if !o.trashed {
+		if !o.Trashed {
 			return ErrNotFound
 		}
-		if err := s.people.RequireActive(ctx, caseID, o.personID); errors.Is(err, platform.ErrNotFound) {
-			return platform.Conflict("This life event's person is in the trash. Restore the person first.")
-		} else if err != nil {
+		if err := s.requireEitherSpouse(ctx, caseID, o.Peeked); err != nil {
 			return err
 		}
-		if err := s.refuseSecondVital(ctx, caseID, o.personID, o.eventType, eventID,
+		if err := s.refuseSecondVital(ctx, caseID, o.PersonID, o.EventType, eventID,
 			"%s already has another %s event. Delete it or change its type before restoring this one."); err != nil {
 			return err
 		}
@@ -332,6 +426,87 @@ func (s *Service) Restore(ctx context.Context, caseID, eventID string) error {
 			return err
 		}
 		return s.rec.Record(ctx, caseID, "restored", eventID, nil)
+	})
+}
+
+// requireEitherSpouse refuses to restore a life event unless one of its people
+// is active: its person, or for a shared marriage either spouse (rule 26).
+func (s *Service) requireEitherSpouse(ctx context.Context, caseID string, p Peeked) error {
+	err := s.people.RequireActive(ctx, caseID, p.PersonID)
+	if errors.Is(err, platform.ErrNotFound) && p.SpouseID != "" {
+		if err = s.people.RequireActive(ctx, caseID, p.SpouseID); errors.Is(err, platform.ErrNotFound) {
+			return platform.Conflict("Both people in this marriage are in the trash. Restore one of them first.")
+		}
+	}
+	if errors.Is(err, platform.ErrNotFound) {
+		return platform.Conflict("This life event's person is in the trash. Restore the person first.")
+	}
+	return err
+}
+
+// HandOverMarriages keeps a person's shared marriages, and their documents,
+// when the person is permanently deleted (rule 26). Each passes to the other
+// spouse, unlinked, with the departing spouse's name, birth date and birth
+// place kept in the flat spouse fields. Called by the trash module inside the
+// permanent delete, before anything is logged or removed.
+func (s *Service) HandOverMarriages(ctx context.Context, caseID, personID string) error {
+	return platform.WithTx(ctx, s.db, func(ctx context.Context) error {
+		if s.documents == nil {
+			return errors.New("lifeevents: document mover not set")
+		}
+		// Locks follow the order every write takes them: the documents that
+		// move, then the departing person, then the marriages. The marriages
+		// are read unlocked to find the documents, then again once locked.
+		peeked, err := s.store.SharedMarriages(ctx, caseID, personID, false)
+		if err != nil || len(peeked) == 0 {
+			return err
+		}
+		docsLocked := map[string]bool{}
+		lockDocs := func(m SharedMarriage) error {
+			if m.PersonID != personID || docsLocked[m.ID] {
+				return nil
+			}
+			docsLocked[m.ID] = true
+			return s.documents.LockEventDocuments(ctx, caseID, m.ID)
+		}
+		for _, m := range peeked {
+			if err := lockDocs(m); err != nil {
+				return err
+			}
+		}
+		if err := s.people.LockPeople(ctx, personID); err != nil {
+			return err
+		}
+		marriages, err := s.store.SharedMarriages(ctx, caseID, personID, true)
+		if err != nil {
+			return err
+		}
+		details, err := s.store.SpouseDetails(ctx, caseID, personID)
+		if err != nil {
+			return err
+		}
+		for _, m := range marriages {
+			survivor := m.PersonID
+			if survivor == personID {
+				survivor = m.SpouseID
+				if err := lockDocs(m); err != nil {
+					return err
+				}
+			}
+			before, after, err := s.store.HandOver(ctx, caseID, m.ID, survivor, details)
+			if err != nil {
+				return err
+			}
+			if survivor != m.PersonID {
+				if err := s.documents.MoveEventDocuments(ctx, caseID, m.ID, survivor); err != nil {
+					return err
+				}
+			}
+			if err := s.rec.Record(ctx, caseID, "updated", m.ID, activitylog.Diff(before.logFields(), after.logFields())); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

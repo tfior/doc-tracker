@@ -266,12 +266,23 @@ CREATE TABLE public.life_events (
     event_date_end text,
     spouse_birth_date_qualifier public.date_qualifier,
     spouse_birth_date_end text,
+    spouse_person_id uuid,
+    divorce_date text,
+    divorce_date_qualifier public.date_qualifier,
+    divorce_date_end text,
+    divorce_place text,
+    CONSTRAINT divorce_date_form CHECK ((public.is_partial_date(divorce_date) AND public.is_partial_date(divorce_date_end))),
+    CONSTRAINT divorce_date_qualified CHECK (((divorce_date IS NULL) = (divorce_date_qualifier IS NULL))),
+    CONSTRAINT divorce_date_range CHECK (((divorce_date_end IS NOT NULL) = COALESCE((divorce_date_qualifier = 'between'::public.date_qualifier), false))),
     CONSTRAINT event_date_form CHECK ((public.is_partial_date(event_date) AND public.is_partial_date(event_date_end))),
     CONSTRAINT event_date_qualified CHECK (((event_date IS NULL) = (event_date_qualifier IS NULL))),
     CONSTRAINT event_date_range CHECK (((event_date_end IS NOT NULL) = COALESCE((event_date_qualifier = 'between'::public.date_qualifier), false))),
+    CONSTRAINT linked_spouse_or_flat_fields CHECK (((spouse_person_id IS NULL) OR ((spouse_name IS NULL) AND (spouse_birth_date IS NULL) AND (spouse_birth_place IS NULL)))),
+    CONSTRAINT spouse_and_divorce_on_marriages CHECK (((event_type = 'marriage'::public.life_event_type) OR ((spouse_person_id IS NULL) AND (spouse_name IS NULL) AND (spouse_birth_date IS NULL) AND (spouse_birth_place IS NULL) AND (divorce_date IS NULL) AND (divorce_place IS NULL)))),
     CONSTRAINT spouse_birth_date_form CHECK ((public.is_partial_date(spouse_birth_date) AND public.is_partial_date(spouse_birth_date_end))),
     CONSTRAINT spouse_birth_date_qualified CHECK (((spouse_birth_date IS NULL) = (spouse_birth_date_qualifier IS NULL))),
-    CONSTRAINT spouse_birth_date_range CHECK (((spouse_birth_date_end IS NOT NULL) = COALESCE((spouse_birth_date_qualifier = 'between'::public.date_qualifier), false)))
+    CONSTRAINT spouse_birth_date_range CHECK (((spouse_birth_date_end IS NOT NULL) = COALESCE((spouse_birth_date_qualifier = 'between'::public.date_qualifier), false))),
+    CONSTRAINT spouse_is_another_person CHECK ((spouse_person_id <> person_id))
 );
 
 
@@ -284,8 +295,12 @@ CREATE VIEW public.active_life_events AS
     le.case_id,
     le.person_id
    FROM (public.life_events le
-     JOIN public.active_people p ON ((p.id = le.person_id)))
-  WHERE (le.deleted_at IS NULL);
+     JOIN public.active_cases c ON ((c.id = le.case_id)))
+  WHERE ((le.deleted_at IS NULL) AND ((EXISTS ( SELECT 1
+           FROM public.active_people p
+          WHERE (p.id = le.person_id))) OR (EXISTS ( SELECT 1
+           FROM public.active_people p
+          WHERE (p.id = le.spouse_person_id)))));
 
 
 --
@@ -331,10 +346,16 @@ CREATE VIEW public.active_documents AS
     d.person_id,
     d.life_event_id
    FROM (public.documents d
-     JOIN public.active_people p ON ((p.id = d.person_id)))
-  WHERE ((d.deleted_at IS NULL) AND ((d.life_event_id IS NULL) OR (EXISTS ( SELECT 1
-           FROM public.active_life_events le
-          WHERE (le.id = d.life_event_id)))));
+     JOIN public.active_cases c ON ((c.id = d.case_id)))
+  WHERE ((d.deleted_at IS NULL) AND
+        CASE
+            WHEN (d.life_event_id IS NULL) THEN (EXISTS ( SELECT 1
+               FROM public.active_people p
+              WHERE (p.id = d.person_id)))
+            ELSE (EXISTS ( SELECT 1
+               FROM public.active_life_events le
+              WHERE (le.id = d.life_event_id)))
+        END);
 
 
 --
@@ -648,6 +669,13 @@ CREATE INDEX life_events_person_id_idx ON public.life_events USING btree (person
 
 
 --
+-- Name: life_events_spouse_person_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX life_events_spouse_person_id ON public.life_events USING btree (spouse_person_id);
+
+
+--
 -- Name: people_case_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -808,6 +836,14 @@ ALTER TABLE ONLY public.life_events
 
 ALTER TABLE ONLY public.life_events
     ADD CONSTRAINT life_events_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id) ON DELETE CASCADE;
+
+
+--
+-- Name: life_events life_events_spouse_person_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.life_events
+    ADD CONSTRAINT life_events_spouse_person_id_fkey FOREIGN KEY (spouse_person_id) REFERENCES public.people(id) ON DELETE SET NULL;
 
 
 --

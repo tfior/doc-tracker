@@ -28,7 +28,10 @@ type Store interface {
 	UpdateLifeEvent(ctx context.Context, caseID, eventID string, input UpdateLifeEventInput) (*LifeEvent, error)
 	DeleteLifeEvent(ctx context.Context, caseID, eventID string) error
 	RequireActive(ctx context.Context, caseID, eventID string) (personID string, err error)
-	Peek(ctx context.Context, caseID, eventID string) (personID, eventType string, trashed bool, err error)
+	Peek(ctx context.Context, caseID, eventID string) (Peeked, error)
+	SharedMarriages(ctx context.Context, caseID, personID string, lock bool) ([]SharedMarriage, error)
+	SpouseDetails(ctx context.Context, caseID, personID string) (*SpouseDetails, error)
+	HandOver(ctx context.Context, caseID, eventID, personID string, d *SpouseDetails) (before, after *LifeEvent, err error)
 	VitalEvent(ctx context.Context, caseID, personID, eventType string) (string, error)
 	VitalHolder(ctx context.Context, caseID, personID, eventType, exceptID string) (string, error)
 	Restore(ctx context.Context, caseID, id string) error
@@ -43,18 +46,23 @@ func NewStore(db *sql.DB) Store {
 	return &store{db: db}
 }
 
-func (s *store) ListLifeEvents(ctx context.Context, caseID string) ([]LifeEvent, error) {
-	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
-		SELECT
+// eventColumns are the columns scanLifeEvent reads, from life_events le joined
+// to its active documents d.
+const eventColumns = `
 			le.id::text, le.case_id::text, le.person_id::text,
 			le.event_type::text,
 			le.event_date, le.event_date_qualifier::text, le.event_date_end, le.event_place,
-			le.spouse_name,
+			le.spouse_person_id::text, le.spouse_name,
 			le.spouse_birth_date, le.spouse_birth_date_qualifier::text, le.spouse_birth_date_end,
 			le.spouse_birth_place,
+			le.divorce_date, le.divorce_date_qualifier::text, le.divorce_date_end, le.divorce_place,
 			le.notes,
 			COUNT(d.id) > 0 AS has_documents,
-			le.version, le.created_at, le.updated_at
+			le.version, le.created_at, le.updated_at`
+
+func (s *store) ListLifeEvents(ctx context.Context, caseID string) ([]LifeEvent, error) {
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
+		SELECT `+eventColumns+`
 		FROM life_events le
 		LEFT JOIN active_documents d ON d.life_event_id = le.id
 		WHERE le.id IN (SELECT id FROM active_life_events WHERE case_id = $1)
@@ -89,8 +97,10 @@ func (s *store) CreateLifeEvent(ctx context.Context, caseID, personID, eventType
 			(case_id, person_id, event_type,
 			 event_date, event_date_qualifier, event_date_end, event_place,
 			 spouse_name, spouse_birth_date, spouse_birth_date_qualifier, spouse_birth_date_end,
-			 spouse_birth_place, notes)
-		VALUES ($1, $2, $3::life_event_type, $4, $5::date_qualifier, $6, $7, $8, $9, $10::date_qualifier, $11, $12, $13)
+			 spouse_birth_place, notes,
+			 spouse_person_id, divorce_date, divorce_date_qualifier, divorce_date_end, divorce_place)
+		VALUES ($1, $2, $3::life_event_type, $4, $5::date_qualifier, $6, $7, $8, $9, $10::date_qualifier, $11, $12, $13,
+			$14::uuid, $15, $16::date_qualifier, $17, $18)
 		RETURNING id::text`,
 		caseID, personID, eventType,
 		dateText(input.EventDate), dateQualifier(input.EventDate), dateEnd(input.EventDate),
@@ -99,6 +109,9 @@ func (s *store) CreateLifeEvent(ctx context.Context, caseID, personID, eventType
 		dateText(input.SpouseBirthDate), dateQualifier(input.SpouseBirthDate), dateEnd(input.SpouseBirthDate),
 		nullToSQL(input.SpouseBirthPlace),
 		nullToSQL(input.Notes),
+		nullToSQL(input.SpousePersonID),
+		dateText(input.DivorceDate), dateQualifier(input.DivorceDate), dateEnd(input.DivorceDate),
+		nullToSQL(input.DivorcePlace),
 	).Scan(&id)
 	if err != nil {
 		return nil, fmt.Errorf("insert life event: %w", err)
@@ -122,6 +135,11 @@ func (s *store) UpdateLifeEvent(ctx context.Context, caseID, eventID string, inp
 			spouse_birth_date_end       = CASE WHEN $12 THEN $15                  ELSE spouse_birth_date_end       END,
 			spouse_birth_place          = CASE WHEN $16 THEN $17                  ELSE spouse_birth_place          END,
 			notes                       = CASE WHEN $18 THEN $19                  ELSE notes                       END,
+			spouse_person_id            = CASE WHEN $21 THEN $22::uuid            ELSE spouse_person_id            END,
+			divorce_date                = CASE WHEN $23 THEN $24                  ELSE divorce_date                END,
+			divorce_date_qualifier      = CASE WHEN $23 THEN $25::date_qualifier  ELSE divorce_date_qualifier      END,
+			divorce_date_end            = CASE WHEN $23 THEN $26                  ELSE divorce_date_end            END,
+			divorce_place               = CASE WHEN $27 THEN $28                  ELSE divorce_place               END,
 			updated_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		eventID, caseID,
@@ -133,6 +151,9 @@ func (s *store) UpdateLifeEvent(ctx context.Context, caseID, eventID string, inp
 		input.SpouseBirthPlace.Set, nullToSQL(input.SpouseBirthPlace),
 		input.Notes.Set, nullToSQL(input.Notes),
 		input.PersonID,
+		input.SpousePersonID.Set, nullToSQL(input.SpousePersonID),
+		input.DivorceDate.Set, dateText(input.DivorceDate), dateQualifier(input.DivorceDate), dateEnd(input.DivorceDate),
+		input.DivorcePlace.Set, nullToSQL(input.DivorcePlace),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update life event: %w", err)
@@ -170,22 +191,18 @@ func (s *store) DeleteLifeEvent(ctx context.Context, caseID, eventID string) err
 // getLifeEvent fetches a single non-deleted life event by ID and case, including
 // the has_documents flag.
 func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*LifeEvent, error) {
+	return s.get(ctx, caseID, eventID, false)
+}
+
+// get fetches a life event, and one in the trash too when trashed is true.
+func (s *store) get(ctx context.Context, caseID, eventID string, trashed bool) (*LifeEvent, error) {
 	row := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
-		SELECT
-			le.id::text, le.case_id::text, le.person_id::text,
-			le.event_type::text,
-			le.event_date, le.event_date_qualifier::text, le.event_date_end, le.event_place,
-			le.spouse_name,
-			le.spouse_birth_date, le.spouse_birth_date_qualifier::text, le.spouse_birth_date_end,
-			le.spouse_birth_place,
-			le.notes,
-			COUNT(d.id) > 0 AS has_documents,
-			le.version, le.created_at, le.updated_at
+		SELECT `+eventColumns+`
 		FROM life_events le
 		LEFT JOIN active_documents d ON d.life_event_id = le.id
-		WHERE le.id = $1 AND le.case_id = $2 AND le.deleted_at IS NULL
+		WHERE le.id = $1 AND le.case_id = $2 AND ($3 OR le.deleted_at IS NULL)
 		GROUP BY le.id`,
-		eventID, caseID,
+		eventID, caseID, trashed,
 	)
 	le, err := scanLifeEvent(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -201,15 +218,16 @@ func (s *store) getLifeEvent(ctx context.Context, caseID, eventID string) (*Life
 // to populate a LifeEvent, handling all nullable fields.
 func scanLifeEvent(scan func(...any) error) (*LifeEvent, error) {
 	var le LifeEvent
-	var eventPlace, spouseName, spouseBirthPlace, notes sql.NullString
-	var eventDate, spouseBirthDate [3]sql.NullString
+	var eventPlace, spousePersonID, spouseName, spouseBirthPlace, divorcePlace, notes sql.NullString
+	var eventDate, spouseBirthDate, divorceDate [3]sql.NullString
 	if err := scan(
 		&le.ID, &le.CaseID, &le.PersonID,
 		&le.EventType,
 		&eventDate[0], &eventDate[1], &eventDate[2], &eventPlace,
-		&spouseName,
+		&spousePersonID, &spouseName,
 		&spouseBirthDate[0], &spouseBirthDate[1], &spouseBirthDate[2],
 		&spouseBirthPlace,
+		&divorceDate[0], &divorceDate[1], &divorceDate[2], &divorcePlace,
 		&notes,
 		&le.HasDocuments,
 		&le.Version, &le.CreatedAt, &le.UpdatedAt,
@@ -220,12 +238,19 @@ func scanLifeEvent(scan func(...any) error) (*LifeEvent, error) {
 	if eventPlace.Valid {
 		le.EventPlace = &eventPlace.String
 	}
+	if spousePersonID.Valid {
+		le.SpousePersonID = &spousePersonID.String
+	}
 	if spouseName.Valid {
 		le.SpouseName = &spouseName.String
 	}
 	le.SpouseBirthDate = platform.ScanQualifiedDate(spouseBirthDate[0], spouseBirthDate[1], spouseBirthDate[2])
 	if spouseBirthPlace.Valid {
 		le.SpouseBirthPlace = &spouseBirthPlace.String
+	}
+	le.DivorceDate = platform.ScanQualifiedDate(divorceDate[0], divorceDate[1], divorceDate[2])
+	if divorcePlace.Valid {
+		le.DivorcePlace = &divorcePlace.String
 	}
 	if notes.Valid {
 		le.Notes = &notes.String
@@ -254,12 +279,31 @@ func dateEnd(n platform.NullQualifiedDate) sql.NullString {
 	return sql.NullString{String: *n.Date.End, Valid: true}
 }
 
+// lockPeopleOf locks the people a life event depends on, its person and linked
+// spouse, so neither can be trashed or deleted until the transaction ends.
+// People are locked before their events, the order every write takes them.
+func (s *store) lockPeopleOf(ctx context.Context, eventID string) error {
+	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
+		SELECT p.id FROM people p
+		JOIN life_events le ON p.id IN (le.person_id, le.spouse_person_id)
+		WHERE le.id = $1
+		ORDER BY p.id FOR SHARE OF p`, eventID); err != nil {
+		return fmt.Errorf("lock life event's people: %w", err)
+	}
+	return nil
+}
+
 // RequireActive returns the event's person, or ErrNotFound unless the event is
-// active: not in the trash and not beneath a trashed person or case. It locks
-// the event, its person and its case until the transaction ends.
+// active: not in the trash, in an active case, and with at least one spouse
+// active. It locks the event, its people and its case until the transaction
+// ends, the people first.
 func (s *store) RequireActive(ctx context.Context, caseID, eventID string) (string, error) {
+	conn := platform.Conn(ctx, s.db)
+	if err := s.lockPeopleOf(ctx, eventID); err != nil {
+		return "", err
+	}
 	var personID string
-	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
+	err := conn.QueryRowContext(ctx,
 		`SELECT person_id::text FROM active_life_events WHERE id = $1 AND case_id = $2 FOR SHARE`,
 		eventID, caseID,
 	).Scan(&personID)
@@ -272,23 +316,122 @@ func (s *store) RequireActive(ctx context.Context, caseID, eventID string) (stri
 	return personID, nil
 }
 
-// Peek returns a life event's person and type, and whether it is in the
-// trash, without locking it. It tells a write which people to lock before the
-// event itself.
-func (s *store) Peek(ctx context.Context, caseID, eventID string) (string, string, bool, error) {
-	var personID, eventType string
-	var trashed bool
-	err := platform.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT person_id::text, event_type::text, deleted_at IS NOT NULL FROM life_events WHERE id = $1 AND case_id = $2`,
+// Peeked is what Peek reads of a life event.
+type Peeked struct {
+	PersonID, SpouseID, EventType string // SpouseID is "" without a linked spouse
+	Trashed                       bool
+}
+
+// Peek reads a life event's person, linked spouse and type, and whether it is
+// in the trash, without locking it. It tells a write which people to lock
+// before the event itself.
+func (s *store) Peek(ctx context.Context, caseID, eventID string) (Peeked, error) {
+	var p Peeked
+	var spouse sql.NullString
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT person_id::text, spouse_person_id::text, event_type::text, deleted_at IS NOT NULL
+		FROM life_events WHERE id = $1 AND case_id = $2`,
 		eventID, caseID,
-	).Scan(&personID, &eventType, &trashed)
+	).Scan(&p.PersonID, &spouse, &p.EventType, &p.Trashed)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", false, ErrNotFound
+		return p, ErrNotFound
 	}
 	if err != nil {
-		return "", "", false, fmt.Errorf("peek life event: %w", err)
+		return p, fmt.Errorf("peek life event: %w", err)
 	}
-	return personID, eventType, trashed, nil
+	p.SpouseID = spouse.String
+	return p, nil
+}
+
+// SharedMarriage is a marriage, in the trash or not, with a linked spouse.
+type SharedMarriage struct {
+	ID, PersonID, SpouseID string
+}
+
+// SharedMarriages returns the marriages with a linked spouse that a person is
+// part of, as either spouse, including those in the trash. It locks them only
+// when lock is true.
+func (s *store) SharedMarriages(ctx context.Context, caseID, personID string, lock bool) ([]SharedMarriage, error) {
+	query := `
+		SELECT id::text, person_id::text, spouse_person_id::text FROM life_events
+		WHERE case_id = $1 AND spouse_person_id IS NOT NULL AND $2 IN (person_id, spouse_person_id)
+		ORDER BY id`
+	if lock {
+		query += ` FOR NO KEY UPDATE`
+	}
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, query, caseID, personID)
+	if err != nil {
+		return nil, fmt.Errorf("shared marriages: %w", err)
+	}
+	defer rows.Close()
+	var out []SharedMarriage
+	for rows.Next() {
+		var m SharedMarriage
+		if err := rows.Scan(&m.ID, &m.PersonID, &m.SpouseID); err != nil {
+			return nil, fmt.Errorf("scan shared marriage: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// SpouseDetails are a person's name, birth date and birth place, as a marriage
+// keeps them in its flat spouse fields.
+type SpouseDetails struct {
+	Name       string
+	BirthDate  platform.NullQualifiedDate
+	BirthPlace platform.NullString
+}
+
+// SpouseDetails reads a person's details for the flat spouse fields: their
+// name, and the date and place of their birth event outside the trash.
+func (s *store) SpouseDetails(ctx context.Context, caseID, personID string) (*SpouseDetails, error) {
+	var name string
+	var date [3]sql.NullString
+	var place sql.NullString
+	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT p.first_name || ' ' || p.last_name,
+			b.event_date, b.event_date_qualifier::text, b.event_date_end, b.event_place
+		FROM people p
+		LEFT JOIN life_events b ON b.person_id = p.id AND b.event_type = 'birth' AND b.deleted_at IS NULL
+		WHERE p.id = $1 AND p.case_id = $2`,
+		personID, caseID,
+	).Scan(&name, &date[0], &date[1], &date[2], &place)
+	if err != nil {
+		return nil, fmt.Errorf("spouse details: %w", err)
+	}
+	d := &SpouseDetails{Name: name, BirthPlace: platform.NullString{Set: true, Valid: place.Valid, Value: place.String}}
+	d.BirthDate.Set = true
+	if q := platform.ScanQualifiedDate(date[0], date[1], date[2]); q != nil {
+		d.BirthDate.Valid, d.BirthDate.Date = true, *q
+	}
+	return d, nil
+}
+
+// HandOver gives a shared marriage, in the trash or not, to personID with no
+// linked spouse, keeping the departing spouse's details in the flat fields.
+func (s *store) HandOver(ctx context.Context, caseID, eventID, personID string, d *SpouseDetails) (*LifeEvent, *LifeEvent, error) {
+	before, err := s.get(ctx, caseID, eventID, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	_, err = platform.Conn(ctx, s.db).ExecContext(ctx, `
+		UPDATE life_events SET
+			person_id = $3, spouse_person_id = NULL,
+			spouse_name = $4,
+			spouse_birth_date = $5, spouse_birth_date_qualifier = $6::date_qualifier, spouse_birth_date_end = $7,
+			spouse_birth_place = $8,
+			updated_at = NOW(), version = version + 1
+		WHERE id = $1 AND case_id = $2`,
+		eventID, caseID, personID, d.Name,
+		dateText(d.BirthDate), dateQualifier(d.BirthDate), dateEnd(d.BirthDate),
+		nullToSQL(d.BirthPlace),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hand over marriage: %w", err)
+	}
+	after, err := s.get(ctx, caseID, eventID, true)
+	return before, after, err
 }
 
 // VitalEvent locks and returns the ID of the person's birth or death event
@@ -355,6 +498,9 @@ func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
 // that it is active. Taking the exclusive lock first means simultaneous writes
 // to the same row wait for each other instead of deadlocking.
 func (s *store) LockActive(ctx context.Context, caseID, id string) (string, error) {
+	if err := s.lockPeopleOf(ctx, id); err != nil {
+		return "", err
+	}
 	if _, err := platform.Conn(ctx, s.db).ExecContext(ctx,
 		`SELECT id FROM life_events WHERE id = $1 FOR NO KEY UPDATE`, id); err != nil {
 		return "", fmt.Errorf("lock life_events: %w", err)
@@ -371,16 +517,22 @@ func (s *store) Get(ctx context.Context, caseID, id string) (*LifeEvent, error) 
 // too, so restores and permanent deletes can be named.
 func (s *store) LogName(ctx context.Context, caseID, id string) (string, error) {
 	var eventType, person string
+	var spouse sql.NullString
 	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
-		SELECT le.event_type::text, p.first_name || ' ' || p.last_name
-		FROM life_events le JOIN people p ON p.id = le.person_id
+		SELECT le.event_type::text, p.first_name || ' ' || p.last_name, sp.first_name || ' ' || sp.last_name
+		FROM life_events le
+		JOIN people p ON p.id = le.person_id
+		LEFT JOIN people sp ON sp.id = le.spouse_person_id
 		WHERE le.id = $1 AND le.case_id = $2`, id, caseID,
-	).Scan(&eventType, &person)
+	).Scan(&eventType, &person, &spouse)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("log name: %w", err)
+	}
+	if spouse.Valid {
+		person += " and " + spouse.String
 	}
 	return eventTypeLabel(eventType) + " life event for " + person, nil
 }

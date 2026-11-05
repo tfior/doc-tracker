@@ -46,6 +46,7 @@ func NewHandler(db *sql.DB) http.Handler {
 		Cases:      casesSvc,
 		People:     peopleSvc,
 		LifeEvents: lifeEventsSvc,
+		Marriages:  lifeEventsSvc,
 		Documents:  documentsSvc,
 		ClaimLines: claimLinesSvc,
 

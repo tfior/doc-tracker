@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { Stack, Group, TextInput, Select, Checkbox, Divider, Button } from '@mantine/core';
 import type { DocumentStatus } from '../../api/documents';
-import type { LifeEvent } from '../../api/lifeevents';
+import { isEventOf, type LifeEvent } from '../../api/lifeevents';
 import type { Person } from '../../api/people';
 import PartialDateInput from '../../components/PartialDateInput';
 import ErrorMessage from '../../components/ErrorMessage';
@@ -62,10 +62,22 @@ export default function DocumentForm({
     });
   }
 
+  // A document belongs to its life event's person. A shared marriage is one of
+  // both spouses' events, so choosing it from the other spouse gives the
+  // document the marriage's person.
+  function setLifeEvent(eventId: string) {
+    const le = lifeEvents.find((le) => le.id === eventId);
+    const ungrouped = hidePerson ? initial.person_id : undefined;
+    setValues((prev) => ({ ...prev, life_event_id: eventId, person_id: le?.person_id ?? ungrouped ?? prev.person_id }));
+  }
+
+  // With the person hidden, the form is opened from that person, whose events
+  // stay on offer even after a shared marriage changes the document's person.
+  const eventsOf = hidePerson ? initial.person_id : values.person_id;
   const lifeEventOptions = [
     { value: '', label: 'None (ungrouped)' },
     ...lifeEvents
-      .filter((le) => le.person_id === values.person_id)
+      .filter((le) => isEventOf(le, eventsOf) || le.id === values.life_event_id)
       .map((le) => ({
         value: le.id,
         label: `${eventTypeLabel(le.event_type)}${le.event_date ? ` — ${formatQualifiedDate(le.event_date)}` : ''}`,
@@ -109,7 +121,7 @@ export default function DocumentForm({
           description="Optional — groups this document under one of the person's events"
           data={lifeEventOptions}
           value={values.life_event_id}
-          onChange={(v) => set('life_event_id', v ?? '')}
+          onChange={(v) => setLifeEvent(v ?? '')}
           error={errors.life_event_id}
           disabled={!values.person_id}
         />

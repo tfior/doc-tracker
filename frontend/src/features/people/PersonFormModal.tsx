@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal, Stack, Loader } from '@mantine/core';
 import { createPerson, updatePerson, type Person } from '../../api/people';
+import { isEventOf } from '../../api/lifeevents';
 import { documentsQuery, invalidateCase, lifeEventsQuery, peopleQuery } from '../../api/queries';
 import { changedFields } from '../../lib/changes';
 import LifeEventListSection from '../life-events/LifeEventListSection';
@@ -96,6 +97,8 @@ function PersonFormBody({ caseId, record, onClose, people }: PersonFormModalProp
     setBase({ person: fresh, initial, start });
   }
 
+  const personEvents = person ? lifeEvents.filter((le) => isEventOf(le, person.id)) : [];
+
   return (
     <Stack>
       <PersonForm
@@ -115,12 +118,13 @@ function PersonFormBody({ caseId, record, onClose, people }: PersonFormModalProp
           <LifeEventListSection
             caseId={caseId}
             personId={person.id}
-            lifeEvents={lifeEvents.filter((le) => le.person_id === person.id)}
+            lifeEvents={personEvents}
             onChanged={eventChanged}
           />
           <DocumentListSection
             caseId={caseId}
-            documents={documents.filter((d) => d.person_id === person.id)}
+            documents={documents.filter((d) =>
+              d.person_id === person.id || personEvents.some((le) => le.id === d.life_event_id))}
             emptyText="No documents yet."
             personId={person.id}
           />

@@ -472,12 +472,24 @@ func (s *store) ids(ctx context.Context, query string, args ...any) ([]string, e
 
 // DeletionImpact counts what is visible beneath a person and would go with
 // them: their active life events, documents, and the claim lines rooted at them.
+// A shared marriage goes only when its other spouse is no longer active
+// (domain-model.md, rule 26): it is counted for whichever spouse leaves last.
 func (s *store) DeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error) {
 	var d DeletionImpact
 	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
+		WITH going AS (
+			SELECT le.id FROM life_events le
+			WHERE le.id IN (SELECT id FROM active_life_events WHERE case_id = $1)
+			  AND ((le.person_id = $2
+			        AND NOT EXISTS (SELECT 1 FROM active_people sp WHERE sp.id = le.spouse_person_id))
+			    OR (le.spouse_person_id = $2
+			        AND NOT EXISTS (SELECT 1 FROM active_people op WHERE op.id = le.person_id)))
+		)
 		SELECT
-			(SELECT COUNT(*) FROM active_life_events WHERE case_id = $1 AND person_id = $2),
-			(SELECT COUNT(*) FROM active_documents WHERE case_id = $1 AND person_id = $2),
+			(SELECT COUNT(*) FROM going),
+			(SELECT COUNT(*) FROM active_documents d
+			 WHERE d.case_id = $1
+			   AND ((d.life_event_id IS NULL AND d.person_id = $2) OR d.life_event_id IN (SELECT id FROM going))),
 			(SELECT COUNT(*) FROM active_claim_lines WHERE case_id = $1 AND root_person_id = $2)`,
 		caseID, personID,
 	).Scan(&d.LifeEvents, &d.Documents, &d.ClaimLines)
@@ -489,14 +501,17 @@ func (s *store) DeletionImpact(ctx context.Context, caseID, personID string) (*D
 
 // TrashedDeletionImpact counts everything a permanent delete of a person in the
 // trash would remove: all their life events, documents, and the claim lines
-// rooted at them, including any moved to the trash separately. It returns
-// ErrNotFound unless the person is itself in the trash.
+// rooted at them, including any moved to the trash separately. Shared
+// marriages pass to the other spouse, so they and their documents are left
+// out. It returns ErrNotFound unless the person is itself in the trash.
 func (s *store) TrashedDeletionImpact(ctx context.Context, caseID, personID string) (*DeletionImpact, error) {
 	var d DeletionImpact
 	err := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT
-			(SELECT COUNT(*) FROM life_events WHERE person_id = p.id),
-			(SELECT COUNT(*) FROM documents WHERE person_id = p.id),
+			(SELECT COUNT(*) FROM life_events WHERE person_id = p.id AND spouse_person_id IS NULL),
+			(SELECT COUNT(*) FROM documents d WHERE d.person_id = p.id
+			   AND NOT EXISTS (SELECT 1 FROM life_events le
+			                   WHERE le.id = d.life_event_id AND le.spouse_person_id IS NOT NULL)),
 			(SELECT COUNT(*) FROM claim_lines WHERE root_person_id = p.id)
 		FROM people p
 		WHERE p.id = $2 AND p.case_id = $1 AND p.deleted_at IS NOT NULL`,

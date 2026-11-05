@@ -12,9 +12,13 @@ export interface LifeEvent {
   event_type: string;
   event_date: QualifiedDate | null;
   event_place: string | null;
+  /** The spouse, when they are a person in the case; marriages only. */
+  spouse_person_id: string | null;
   spouse_name: string | null;
   spouse_birth_date: QualifiedDate | null;
   spouse_birth_place: string | null;
+  divorce_date: QualifiedDate | null;
+  divorce_place: string | null;
   notes: string | null;
   has_documents: boolean;
   version: number;
@@ -28,10 +32,21 @@ export interface LifeEventInput {
   event_type?: string;
   event_date?: QualifiedDate | null;
   event_place?: string | null;
+  spouse_person_id?: string | null;
   spouse_name?: string | null;
   spouse_birth_date?: QualifiedDate | null;
   spouse_birth_place?: string | null;
+  divorce_date?: QualifiedDate | null;
+  divorce_place?: string | null;
   notes?: string | null;
+}
+
+/**
+ * Whether a life event is one of a person's: theirs, or a marriage where they
+ * are the linked spouse (domain-model.md, rule 24).
+ */
+export function isEventOf(le: LifeEvent, personId: string): boolean {
+  return le.person_id === personId || le.spouse_person_id === personId;
 }
 
 export interface LifeEventDeletionImpact {

@@ -34,6 +34,13 @@ type PersonDependent interface {
 	LogDeletedWithPerson(ctx context.Context, caseID, personID string) error
 }
 
+// MarriageKeeper is what this module needs from the lifeevents module: a
+// person's shared marriages pass to the other spouse, rather than going with
+// the person, before the person is permanently deleted.
+type MarriageKeeper interface {
+	HandOverMarriages(ctx context.Context, caseID, personID string) error
+}
+
 // LifeEventDependent is a module whose records are permanently deleted along
 // with a life event. It logs them before they go.
 type LifeEventDependent interface {
@@ -48,6 +55,7 @@ type Owners struct {
 	LifeEvents EntityOwner
 	Documents  EntityOwner
 	ClaimLines EntityOwner
+	Marriages  MarriageKeeper
 
 	WithPerson    []PersonDependent
 	WithLifeEvent []LifeEventDependent
@@ -102,9 +110,13 @@ func (s *Service) RestorePerson(ctx context.Context, caseID, personID string) er
 }
 
 // PermanentDeletePerson deletes a trashed person, and logs every record that
-// goes with them, in one transaction.
+// goes with them, in one transaction. Their shared marriages are handed over
+// first, so they are not among what goes.
 func (s *Service) PermanentDeletePerson(ctx context.Context, caseID, personID string) error {
 	return s.run(ctx, func(ctx context.Context) error {
+		if err := s.owners.Marriages.HandOverMarriages(ctx, caseID, personID); err != nil {
+			return err
+		}
 		for _, d := range s.owners.WithPerson {
 			if err := d.LogDeletedWithPerson(ctx, caseID, personID); err != nil {
 				return err
