@@ -10,9 +10,10 @@ The design docs (`domain-model.md`, `architecture.md`, `api-conventions.md`) des
 | 4 | Dates and life events | Done |
 | 5 | Readiness | Next |
 | 6 | Cases and applications | |
-| 7 | Deployable — **MVP complete** | |
-| 8 | Files | After the MVP |
-| 9 | Exports | After the MVP |
+| 7 | Comparison | |
+| 8 | Deployable — **MVP complete** | |
+| 9 | Files | After the MVP |
+| 10 | Exports | After the MVP |
 
 **Working rules for every milestone**
 
@@ -20,7 +21,7 @@ The design docs (`domain-model.md`, `architecture.md`, `api-conventions.md`) des
 - Every domain rule a milestone touches gets a test that would fail if the rule were not enforced.
 - When a branch touches a file, it also clears that file's entries in the Small Fixes checklist at the end of this document.
 - A migration never discards data.
-- From Milestone 7 onward, a branch that adds a migration runs it against a copy of a realistic database before merging, not only an empty one.
+- From Milestone 8 onward, a branch that adds a migration runs it against a copy of a realistic database before merging, not only an empty one.
 - A pull request is ready when: all tests pass; the milestone's tasks it completes are ticked; the design docs agree with the code; and the Small Fixes entries for every file it touched are cleared.
 
 ---
@@ -245,7 +246,6 @@ After this milestone the app answers "what is still outstanding on this case?".
 - Every document shows whether it is ready and, if not, why
 - A case shows how many of its documents are ready, and lists the rest by what they are waiting on
 - A request's date and reference number are recorded, and the time it has been waiting is visible
-- Everything a document records about anyone can be compared side by side for a person
 
 ### Backend
 
@@ -255,17 +255,13 @@ After this milestone the app answers "what is still outstanding on this case?".
 - [ ] A since date on each phase, set automatically and correctable; a reference on each phase
 - [ ] The `for_submission` flag
 - [ ] Document types: non-naturalization certificate, divorce record, court order
-- [ ] `recorded_age` on documents, returned with the birth window it implies
-- [ ] DocumentNamedPerson, saved and logged with its document
-- [ ] The recorded-details comparison for a person, birth certificate first as the reference, with adjacent rows for their parents, their spouses, and their children's other parent
 - [ ] The age of a document's current copy
 
 ### Frontend
 
 - [ ] Documents table: readiness with reasons, and time in the current status; the phase labelled "Apostille / Legalization"
 - [ ] Case overview: progress summary and the outstanding list by stage, sortable by time waiting; every row names its person
-- [ ] Document form: "Details checked against scan" with who and when; since date and reference per phase; "for submission"; "Other people named in this document"
-- [ ] Person screen: the comparison table, grouped by person, self, parents, spouses
+- [ ] Document form: "Details checked against scan" with who and when; since date and reference per phase; "for submission"
 
 ---
 
@@ -304,7 +300,31 @@ After this milestone the app answers "what is still outstanding on this case?".
 
 ---
 
-## Milestone 7 — Deployable
+## Milestone 7 — Comparison
+
+After this milestone, what every document records about a person can be compared, and corrected, in one place.
+
+### Acceptance Criteria
+
+- Everything the documents record about a person can be compared side by side, on the person screen and along a whole claim line
+- Recorded details can be corrected in the comparison itself, as in a spreadsheet
+
+### Backend
+
+- [ ] `recorded_age` on documents, returned with the birth window it implies
+- [ ] DocumentNamedPerson, saved and logged with its document
+- [ ] The comparison for a person: their own group, birth certificate first as the reference, then their parents, their spouses, and their children's other parent
+- [ ] The comparison for a claim line: each person on the path from the root ancestor down, each followed by the other parent of the next person on it
+
+### Frontend
+
+- [ ] Document form: "Other people named in this document"
+- [ ] The comparison table, shared by the person screen and the claim line view, with each group headed by its working name
+- [ ] Editing in the table: arrow keys between cells, Enter to edit and Esc to cancel; each row saved when it is left, with its version, and a conflict shown on that row only; a named person added to a document from the table
+
+---
+
+## Milestone 8 — Deployable
 
 **The MVP is complete when this milestone is done and the Small Fixes checklist is empty.**
 
@@ -343,7 +363,7 @@ After this milestone the app answers "what is still outstanding on this case?".
 
 ---
 
-## Milestone 8 — Files (after the MVP)
+## Milestone 9 — Files (after the MVP)
 
 Scans are attached to documents and can be opened or downloaded one at a time.
 
@@ -364,7 +384,7 @@ Scans are attached to documents and can be opened or downloaded one at a time.
 
 ---
 
-## Milestone 9 — Exports (after the MVP)
+## Milestone 10 — Exports (after the MVP)
 
 - [ ] Application Files export for one application: a ZIP of the current submission file of every ready document
 - [ ] Generated file names and packet order
@@ -389,5 +409,5 @@ Minor issues found in the October 2026 review. Each is cleared when its file is 
 - [x] Lists have a stable order when dates are equal or missing
 - [x] Spouse details cannot be saved on events that are not marriages (4)
 - [x] The overview's list of life events without documents names each event's person (5)
-- [ ] Login takes the same time for an unknown email as for a wrong password (7)
-- [ ] Creating a user asks for the password twice and enforces a minimum length (7)
+- [ ] Login takes the same time for an unknown email as for a wrong password (8)
+- [ ] Creating a user asks for the password twice and enforces a minimum length (8)
