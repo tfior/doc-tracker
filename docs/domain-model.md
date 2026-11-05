@@ -178,7 +178,7 @@ PersonRelationship is a bare join table with no soft-delete. Deletions are hard-
 ---
 
 ### LifeEvent
-A significant event in a person's life that may require one or more documents to prove. The in-line subject (`person_id`) is the lineage-relevant person. A divorce is recorded on the marriage event it ended, not as a separate event.
+A significant event in a person's life that may require one or more documents to prove. The event's subject (`person_id`) is the Person it belongs to. A divorce is recorded on the marriage event it ended, not as a separate event.
 
 A spouse is usually not a Person record: their details are stored as flat fields on the marriage event. When the case keeps records of the spouse's own, such as an ancestor on a ClaimLine's path or a candidate root ancestor, the spouse is a Person, and the marriage event links to them through `spouse_person_id`. There is then one marriage event and one set of Documents for the marriage, shown under both people. On those Documents the second spouse is recorded as a DocumentNamedPerson with role `spouse`, linked to their Person.
 
@@ -190,7 +190,7 @@ A LifeEvent may be reassigned to a different Person within the same Case. Cross-
 |---|---|---|
 | id | uuid | |
 | case_id | uuid | FK → Case |
-| person_id | uuid | FK → Person (in-line subject); reassignable within same Case |
+| person_id | uuid | FK → Person, the event's subject; reassignable within same Case |
 | event_type | enum | birth, marriage, death, naturalization, immigration, other |
 | event_date | qualified date? | |
 | event_place | text? | |
@@ -448,7 +448,11 @@ A **supporting** file is anything else worth keeping with the document, such as 
 
 60. A Document's recorded details are its own `recorded_*` fields, which describe its subject, and its DocumentNamedPerson entries, which describe the other people it names. `details_checked` attests to all of them.
 61. A DocumentNamedPerson may be linked only to a Person in the same Case, and not to the Document's own subject.
-62. Everything recorded about a Person is the `recorded_*` fields of that Person's own Documents together with every DocumentNamedPerson entry linked to them. The person screen shows these side by side, one row per mention, with the recorded name, the birth date or the age with its implied birth window, and the birth place. Rows for the people around them follow in adjacent groups, so that what different documents record about the same individual can be compared even when that individual is not a Person: their parents (the father and mother entries on the Person's own Documents, and each parent's own rows when the parent is a Person); and their spouses and the other parent of their children (each marriage's spouse details, the spouse entries on the Person's own Documents, and the parent entries on their children's Documents that are not linked to the Person). The Person's birth certificate is listed first and marked as the reference, since their other documents must agree with it. Comparison is by eye; automatic discrepancy flagging is deferred post-MVP.
+62. Everything recorded about a Person is the `recorded_*` fields of that Person's own Documents together with every DocumentNamedPerson entry linked to them, one row per mention, with the recorded name, the birth date or the age with its implied birth window, and the birth place. The Person's birth certificate is listed first and marked as the reference, since their other documents must agree with it. Rows are shown in groups, one per individual, so that what different documents record about the same individual can be compared even when that individual is not a Person. A group is headed by the Person's working name, or by the marriage's spouse name when the individual is not a Person; the heading is not compared. A Document appears on as many rows as the people it mentions. Two views show these groups:
+    - The person screen shows the Person's own group, then their parents (the father and mother entries on the Person's own Documents, and each parent's own rows when the parent is a Person), then their spouses and the other parent of their children (each marriage's spouse details, the spouse entries on the Person's own Documents, and the parent entries on their children's Documents that are not linked to the Person).
+    - The claim line view shows the path from the root ancestor down to the applicant: each Person on the path has their own group, followed by a group for the other parent of the next Person on the path, gathered as on the person screen. Other spouses are not shown. Each mention appears once, in the group of the individual it describes.
+
+    In both views the recorded details can be edited in place, each row saved on its own with its record's version. Derived values, such as a birth window, are not editable. Comparison is by eye; automatic discrepancy flagging is deferred post-MVP.
 63. Changes to a Document's DocumentNamedPerson entries are logged as part of that Document's `updated` ActivityLog entry.
 
 ### Activity Log
@@ -493,7 +497,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 - Activity log data capture on all write operations, in the same transaction as the change (display deferred)
 - Record versions, so concurrent edits are refused rather than silently overwritten
 - Partial and qualified dates, and recorded ages
-- Other people named in a document, and a per-person comparison of recorded details
+- Other people named in a document, and a comparison of recorded details for each person and along each claim line, editable in place
 - Marriages between two people in a case (one shared marriage event)
 - Case statuses (active, on hold, complete), archiving, and case notes
 - Claim lines as stored paths from root ancestor to applicant; one pursued line per applicant, all to the case's pursued root ancestor
@@ -539,6 +543,8 @@ A **supporting** file is anything else worth keeping with the document, such as 
 - Documents attached to an application rather than a person (powers of attorney, application forms), and an Attorney File export that includes them
 - A link from amended documents to the court order that amended them
 - Document age limits per application, with warnings (a planned submission date, and documents marked as needing a recent copy)
+- A case-wide view of the age of every document's current copy
+- An option for the claim line view to show every marriage of the people on the path, not only the one that continues the line
 - A prompt to reset the later phases when an official copy is replaced
 - Expense tracking per request (fees, shipping, invoicing)
 - Physical location of a document (with domestic team, with overseas team, with attorney, with client; user-defined options later)

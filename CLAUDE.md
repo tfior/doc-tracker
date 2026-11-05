@@ -34,7 +34,7 @@ IMPORTANT: Changes to these documents, including this CLAUDE.md file, are decisi
 
 ## General Development Guidelines
 
-- Stack: React + TypeScript + Vite (frontend), Go (backend), PostgreSQL, S3-compatible storage (local development store to be chosen in Milestone 8)
+- Stack: React + TypeScript + Vite (frontend), Go (backend), PostgreSQL, S3-compatible storage (local development store to be chosen in Milestone 9)
 - Architecture: modular monolith, feature-first module structure
 - SQL: explicit migrations, no heavy ORM magic
 - The frontend feature structure mirrors the backend module structure
