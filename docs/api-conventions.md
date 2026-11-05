@@ -59,7 +59,7 @@ An operation that is not a plain create, read, update, or delete is a sub-path o
 | Restore from trash | `POST /api/v1/cases/:caseId/<resource>/:id/restore` (and `POST /api/v1/cases/:caseId/restore`) |
 | Permanently delete | `DELETE /api/v1/cases/:caseId/<resource>/:id/permanent` (and `DELETE /api/v1/cases/:caseId/permanent`) |
 | Archive or unarchive a case | `POST /api/v1/cases/:caseId/archive`, `POST /api/v1/cases/:caseId/unarchive` |
-| Promote a flat-field spouse to a Person | `POST /api/v1/cases/:caseId/life-events/:lifeEventId/promote-spouse` |
+| Promote a flat-field spouse to a Person (deferred) | `POST /api/v1/cases/:caseId/life-events/:lifeEventId/promote-spouse` |
 | Make an earlier submission file current | `POST /api/v1/cases/:caseId/documents/:documentId/files/:fileId/restore` |
 
 ## HTTP Methods

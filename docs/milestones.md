@@ -220,17 +220,17 @@ API
 - [x] `recorded_date` renamed to `registration_date`
 - [x] Person birth and death fields removed; values migrated into birth and death life events
 - [x] At most one birth event and one death event per person; saving a person writes them in the same transaction
-- [ ] `divorce_date` and `divorce_place` on marriage events
-- [ ] `spouse_person_id` on marriage events; a person's life events include marriages where they are the linked spouse
-- [ ] A shared marriage survives the deletion of one spouse
-- [ ] Spouse and divorce fields are refused on events that are not marriages
+- [x] `divorce_date` and `divorce_place` on marriage events
+- [x] `spouse_person_id` on marriage events; a person's life events include marriages where they are the linked spouse
+- [x] A shared marriage survives the deletion of one spouse
+- [x] Spouse and divorce fields are refused on events that are not marriages
 - [ ] Seed data: the Rossi case with its line marked ineligible, and a second case through a grandparent marked eligible; the seed goes through the services, not raw SQL
 
 ### Frontend
 
 - [x] A shared date input in `components/`: a qualifier and separate year, month and day fields, with month and day optional and impossible days not offered
 - [x] The person form edits birth and death through their life events
-- [ ] The marriage form can link the spouse to a person in the case, and has a "Marriage ended in divorce" section
+- [x] The marriage form can link the spouse to a person in the case, and has a "Marriage ended in divorce" section
 - [ ] Wording: "Root Ancestor", "Registration date", and the "As recorded in document" heading
 - [x] Every date is displayed in words, day first: "4 March 1890", "March 1890", "about 1890"
 
@@ -257,7 +257,7 @@ After this milestone the app answers "what is still outstanding on this case?".
 - [ ] Document types: non-naturalization certificate, divorce record, court order
 - [ ] `recorded_age` on documents, returned with the birth window it implies
 - [ ] DocumentNamedPerson, saved and logged with its document
-- [ ] The recorded-details comparison for a person, birth certificate first as the reference
+- [ ] The recorded-details comparison for a person, birth certificate first as the reference, with adjacent rows for their parents, their spouses, and their children's other parent
 - [ ] The age of a document's current copy
 
 ### Frontend
@@ -265,7 +265,7 @@ After this milestone the app answers "what is still outstanding on this case?".
 - [ ] Documents table: readiness with reasons, and time in the current status; the phase labelled "Apostille / Legalization"
 - [ ] Case overview: progress summary and the outstanding list by stage, sortable by time waiting; every row names its person
 - [ ] Document form: "Details checked against scan" with who and when; since date and reference per phase; "for submission"; "Other people named in this document"
-- [ ] Person screen: the comparison table
+- [ ] Person screen: the comparison table, grouped by person, self, parents, spouses
 
 ---
 
@@ -387,7 +387,7 @@ Minor issues found in the October 2026 review. Each is cleared when its file is 
 - [x] After logging in, the user lands on the page they were heading for
 - [x] A crash in one component shows an error message, not a blank screen
 - [x] Lists have a stable order when dates are equal or missing
-- [ ] Spouse details cannot be saved on events that are not marriages (4)
+- [x] Spouse details cannot be saved on events that are not marriages (4)
 - [x] The overview's list of life events without documents names each event's person (5)
 - [ ] Login takes the same time for an unknown email as for a wrong password (7)
 - [ ] Creating a user asks for the password twice and enforces a minimum length (7)

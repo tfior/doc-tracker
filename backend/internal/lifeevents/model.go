@@ -18,9 +18,12 @@ type LifeEvent struct {
 	EventType        string                  `json:"event_type"`
 	EventDate        *platform.QualifiedDate `json:"event_date"`
 	EventPlace       *string                 `json:"event_place"`
+	SpousePersonID   *string                 `json:"spouse_person_id"`
 	SpouseName       *string                 `json:"spouse_name"`
 	SpouseBirthDate  *platform.QualifiedDate `json:"spouse_birth_date"`
 	SpouseBirthPlace *string                 `json:"spouse_birth_place"`
+	DivorceDate      *platform.QualifiedDate `json:"divorce_date"`
+	DivorcePlace     *string                 `json:"divorce_place"`
 	Notes            *string                 `json:"notes"`
 	HasDocuments     bool                    `json:"has_documents"`
 	Version          int                     `json:"version"`
@@ -34,9 +37,12 @@ type UpdateLifeEventInput struct {
 	EventType        *string
 	EventDate        platform.NullQualifiedDate
 	EventPlace       platform.NullString
+	SpousePersonID   platform.NullString
 	SpouseName       platform.NullString
 	SpouseBirthDate  platform.NullQualifiedDate
 	SpouseBirthPlace platform.NullString
+	DivorceDate      platform.NullQualifiedDate
+	DivorcePlace     platform.NullString
 	Notes            platform.NullString
 }
 
@@ -47,9 +53,12 @@ func (le *LifeEvent) logFields() activitylog.Fields {
 		"event_type":         le.EventType,
 		"event_date":         dateValue(le.EventDate),
 		"event_place":        activitylog.Value(le.EventPlace),
+		"spouse_person_id":   activitylog.Value(le.SpousePersonID),
 		"spouse_name":        activitylog.Value(le.SpouseName),
 		"spouse_birth_date":  dateValue(le.SpouseBirthDate),
 		"spouse_birth_place": activitylog.Value(le.SpouseBirthPlace),
+		"divorce_date":       dateValue(le.DivorceDate),
+		"divorce_place":      activitylog.Value(le.DivorcePlace),
 		"notes":              activitylog.Value(le.Notes),
 	}
 }

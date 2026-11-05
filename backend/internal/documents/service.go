@@ -54,20 +54,20 @@ func (s *Service) ListDocumentStatuses(ctx context.Context, phase string) ([]Doc
 	return s.store.ListDocumentStatuses(ctx, phase)
 }
 
-// requireParents checks that the person, and the life event if one is given,
-// are active, and that the life event belongs to that person.
+// requireParents checks that the document's parent is active, and that the
+// life event, if one is given, belongs to the person. A document under a life
+// event depends on the event, which for a shared marriage stays active while
+// either spouse is; one without an event depends on its person.
 func (s *Service) requireParents(ctx context.Context, caseID, personID string, lifeEventID platform.NullString) error {
-	if err := s.people.RequireActive(ctx, caseID, personID); err != nil {
+	if !lifeEventID.Set || !lifeEventID.Valid {
+		return platform.MapNotFound(s.people.RequireActive(ctx, caseID, personID), ErrNotFound)
+	}
+	eventPerson, err := s.lifeEvents.RequireActive(ctx, caseID, lifeEventID.Value)
+	if err != nil {
 		return platform.MapNotFound(err, ErrNotFound)
 	}
-	if lifeEventID.Set && lifeEventID.Valid {
-		eventPerson, err := s.lifeEvents.RequireActive(ctx, caseID, lifeEventID.Value)
-		if err != nil {
-			return platform.MapNotFound(err, ErrNotFound)
-		}
-		if eventPerson != personID {
-			return platform.Invalid("The life event belongs to a different person.")
-		}
+	if eventPerson != personID {
+		return platform.Invalid("The life event belongs to a different person.")
 	}
 	return nil
 }
@@ -206,18 +206,18 @@ func (s *Service) Restore(ctx context.Context, caseID, docID string) error {
 		if err != nil {
 			return err
 		}
-		parentTrashed := platform.Conflict("This document's person or life event is in the trash. Restore it first.")
-		if err := s.people.RequireActive(ctx, caseID, personID); errors.Is(err, platform.ErrNotFound) {
-			return parentTrashed
-		} else if err != nil {
-			return err
-		}
+		// A document under a life event depends on the event, as in
+		// requireParents; one without an event depends on its person.
+		var parentErr error
 		if lifeEventID != nil {
-			if _, err := s.lifeEvents.RequireActive(ctx, caseID, *lifeEventID); errors.Is(err, platform.ErrNotFound) {
-				return parentTrashed
-			} else if err != nil {
-				return err
-			}
+			_, parentErr = s.lifeEvents.RequireActive(ctx, caseID, *lifeEventID)
+		} else {
+			parentErr = s.people.RequireActive(ctx, caseID, personID)
+		}
+		if errors.Is(parentErr, platform.ErrNotFound) {
+			return platform.Conflict("This document's person or life event is in the trash. Restore it first.")
+		} else if parentErr != nil {
+			return parentErr
 		}
 		if err := s.store.Restore(ctx, caseID, docID); err != nil {
 			return err

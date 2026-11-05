@@ -386,9 +386,9 @@ func (s *store) PermanentDelete(ctx context.Context, caseID, id string) error {
 }
 
 // RequireActive returns the document's person, or ErrNotFound unless the
-// document is active: not in the trash and not beneath a trashed life event,
-// person or case. It locks the document, its person and its case until the
-// transaction ends.
+// document is active: not in the trash, in an active case, and beneath an
+// active life event, or an active person when it has none. It locks the
+// document, its person, its life event and its case until the transaction ends.
 func (s *store) RequireActive(ctx context.Context, caseID, docID string) (string, error) {
 	conn := platform.Conn(ctx, s.db)
 	var personID string
@@ -404,8 +404,17 @@ func (s *store) RequireActive(ctx context.Context, caseID, docID string) (string
 	if err != nil {
 		return "", fmt.Errorf("verify document: %w", err)
 	}
-	// The view checks the life event without locking it, so lock it here: the
-	// event cannot then be trashed while this document is being changed.
+	// The view checks the people and life event it depends on without locking
+	// them, so lock them here, people first: none can then be trashed while
+	// this document is being changed. A document under a life event depends on
+	// the event's people, both spouses for a shared marriage.
+	if _, err := conn.ExecContext(ctx, `
+		SELECT p.id FROM people p
+		WHERE p.id = $1 OR p.id IN (SELECT le.person_id FROM life_events le WHERE le.id = $2
+		                            UNION SELECT le.spouse_person_id FROM life_events le WHERE le.id = $2)
+		ORDER BY p.id FOR SHARE`, personID, lifeEventID); err != nil {
+		return "", fmt.Errorf("lock document's people: %w", err)
+	}
 	if lifeEventID.Valid {
 		var id string
 		err := conn.QueryRowContext(ctx,

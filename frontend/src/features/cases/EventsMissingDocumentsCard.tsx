@@ -6,7 +6,7 @@ import { Card, Title, Text, List, Group, ThemeIcon } from '@mantine/core';
 import type { LifeEvent } from '../../api/lifeevents';
 import type { Person } from '../../api/people';
 import { eventTypeLabel } from '../life-events/options';
-import { personName } from '../people/personName';
+import { eventPeople } from '../people/personName';
 import { formatQualifiedDate } from '../../lib/dates';
 
 interface EventsMissingDocumentsCardProps {
@@ -32,7 +32,7 @@ export default function EventsMissingDocumentsCard({ events, people }: EventsMis
                 <span />
               </ThemeIcon>
               <Text size="sm">
-                {personName(e.person_id, people)}: {eventTypeLabel(e.event_type)}
+                {eventPeople(e, people)}: {eventTypeLabel(e.event_type)}
                 {e.event_date ? ` — ${formatQualifiedDate(e.event_date)}` : ''}
               </Text>
             </Group>

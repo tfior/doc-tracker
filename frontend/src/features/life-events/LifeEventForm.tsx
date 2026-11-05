@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { useState } from 'react';
-import { Stack, Group, TextInput, Select, Button } from '@mantine/core';
+import { Stack, Group, TextInput, Select, Button, Checkbox } from '@mantine/core';
 import type { Person } from '../../api/people';
 import QualifiedDateInput from '../../components/QualifiedDateInput';
 import ErrorMessage from '../../components/ErrorMessage';
@@ -14,7 +14,8 @@ import { EVENT_TYPE_OPTIONS } from './options';
 
 const SHOWN_FIELDS = [
   'person_id', 'event_type', 'event_date', 'event_place',
-  'spouse_name', 'spouse_birth_date', 'spouse_birth_place', 'notes',
+  'spouse_person_id', 'spouse_name', 'spouse_birth_date', 'spouse_birth_place',
+  'divorce_date', 'divorce_place', 'notes',
 ];
 
 interface LifeEventFormProps {
@@ -77,25 +78,63 @@ export default function LifeEventForm({
       />
       {values.event_type === 'marriage' && (
         <>
-          <TextInput
-            label="Spouse Name"
-            value={values.spouse_name}
-            onChange={(e) => set('spouse_name', e.currentTarget.value)}
-            error={errors.spouse_name}
+          <Select
+            label="Spouse"
+            description="Choose the spouse if they are a person in this case. Otherwise, enter their details below."
+            placeholder="Not a person in this case"
+            data={personOptions(people.filter((p) => p.id !== values.person_id))}
+            value={values.spouse_person_id || null}
+            onChange={(v) => set('spouse_person_id', v ?? '')}
+            error={errors.spouse_person_id}
+            searchable
+            clearable
           />
-          <QualifiedDateInput
-            label="Spouse Birth Date"
-            field="spouse_birth_date"
-            value={values.spouse_birth_date}
-            onChange={(v) => set('spouse_birth_date', v)}
-            errors={errors}
+          {!values.spouse_person_id && (
+            <>
+              <TextInput
+                label="Spouse Name"
+                value={values.spouse_name}
+                onChange={(e) => set('spouse_name', e.currentTarget.value)}
+                error={errors.spouse_name}
+              />
+              <QualifiedDateInput
+                label="Spouse Birth Date"
+                field="spouse_birth_date"
+                value={values.spouse_birth_date}
+                onChange={(v) => set('spouse_birth_date', v)}
+                errors={errors}
+              />
+              <TextInput
+                label="Spouse Birth Place"
+                value={values.spouse_birth_place}
+                onChange={(e) => set('spouse_birth_place', e.currentTarget.value)}
+                error={errors.spouse_birth_place}
+              />
+            </>
+          )}
+          <Checkbox
+            label="Marriage ended in divorce"
+            checked={values.divorced}
+            onChange={(e) => set('divorced', e.currentTarget.checked)}
           />
-          <TextInput
-            label="Spouse Birth Place"
-            value={values.spouse_birth_place}
-            onChange={(e) => set('spouse_birth_place', e.currentTarget.value)}
-            error={errors.spouse_birth_place}
-          />
+          {values.divorced && (
+            <>
+              <QualifiedDateInput
+                label="Divorce Date"
+                field="divorce_date"
+                value={values.divorce_date}
+                onChange={(v) => set('divorce_date', v)}
+                errors={errors}
+              />
+              <TextInput
+                label="Divorce Place"
+                description="Where the divorce was granted."
+                value={values.divorce_place}
+                onChange={(e) => set('divorce_place', e.currentTarget.value)}
+                error={errors.divorce_place}
+              />
+            </>
+          )}
         </>
       )}
       <TextInput

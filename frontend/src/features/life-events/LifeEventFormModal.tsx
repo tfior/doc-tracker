@@ -8,7 +8,7 @@ import { Modal, Stack } from '@mantine/core';
 import { createLifeEvent, updateLifeEvent, type LifeEvent } from '../../api/lifeevents';
 import { documentsQuery, invalidateCase, lifeEventsQuery, peopleQuery } from '../../api/queries';
 import { changedFields } from '../../lib/changes';
-import { personName } from '../people/personName';
+import { eventPeople } from '../people/personName';
 import DocumentListSection from '../documents/DocumentListSection';
 import LifeEventForm from './LifeEventForm';
 import { lifeEventFormValues, lifeEventInput, type LifeEventFormValues } from './lifeEventFormValues';
@@ -30,7 +30,7 @@ export default function LifeEventFormModal(props: LifeEventFormModalProps) {
   const { caseId, record, opened, onClose } = props;
   const people = useQuery(peopleQuery(caseId)).data?.items ?? [];
   const title = record
-    ? `${personName(record.person_id, people)} — ${eventTypeLabel(record.event_type)}`
+    ? `${eventPeople(record, people)} — ${eventTypeLabel(record.event_type)}`
     : 'Add Life Event';
 
   return (

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -222,4 +223,72 @@ func TestMigration_TwoBirthEventsStop(t *testing.T) {
 	err := m.Up()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Giuseppe Rossi")
+}
+
+// Scenario 12 (marriages): spouse details already saved on events that are not
+// marriages move into those events' notes, so nothing is lost, and marriages
+// keep theirs. Afterwards the database refuses spouse or divorce details on
+// any other event, and a linked spouse together with flat spouse details.
+func TestMigration_SpouseDetailsOnlyOnMarriages(t *testing.T) {
+	db, m := migrateTo(t, 12)
+
+	var caseID, personID, spouseID string
+	require.NoError(t, db.QueryRow(`INSERT INTO cases (title) VALUES ('Rossi') RETURNING id`).Scan(&caseID))
+	require.NoError(t, db.QueryRow(
+		`INSERT INTO people (case_id, first_name, last_name) VALUES ($1, 'Giuseppe', 'Rossi') RETURNING id`,
+		caseID).Scan(&personID))
+	require.NoError(t, db.QueryRow(
+		`INSERT INTO people (case_id, first_name, last_name) VALUES ($1, 'Maria', 'Bianchi') RETURNING id`,
+		caseID).Scan(&spouseID))
+	event := func(eventType string, notes any) string {
+		var id string
+		require.NoError(t, db.QueryRow(`
+			INSERT INTO life_events (case_id, person_id, event_type, spouse_name,
+				spouse_birth_date, spouse_birth_date_qualifier, spouse_birth_date_end, spouse_birth_place, notes)
+			VALUES ($1, $2, $3, 'Maria Bianchi', '1880', 'between', '1882', 'Palermo', $4) RETURNING id`,
+			caseID, personID, eventType, notes).Scan(&id))
+		return id
+	}
+	death := event("death", "Buried in Brooklyn")
+	marriage := event("marriage", nil)
+
+	up(t, m)
+
+	var name, place, notes sql.NullString
+	require.NoError(t, db.QueryRow(
+		`SELECT spouse_name, spouse_birth_place, notes FROM life_events WHERE id = $1`, death,
+	).Scan(&name, &place, &notes))
+	assert.False(t, name.Valid, "spouse details are cleared from the death event")
+	assert.False(t, place.Valid)
+	assert.Equal(t, "Buried in Brooklyn\nSpouse name: Maria Bianchi\nSpouse birth date: between 1880 and 1882\nSpouse birth place: Palermo",
+		notes.String, "and kept in its notes")
+
+	require.NoError(t, db.QueryRow(
+		`SELECT spouse_name, spouse_birth_place, notes FROM life_events WHERE id = $1`, marriage,
+	).Scan(&name, &place, &notes))
+	assert.Equal(t, "Maria Bianchi", name.String, "a marriage keeps its spouse details")
+	assert.Equal(t, "Palermo", place.String)
+	assert.False(t, notes.Valid)
+
+	refused := map[string]string{
+		"divorce details on another event": `INSERT INTO life_events (case_id, person_id, event_type, divorce_place)
+			VALUES ($1, $2, 'other', 'Reno')`,
+		"a linked spouse on another event": `INSERT INTO life_events (case_id, person_id, event_type, spouse_person_id)
+			VALUES ($1, $2, 'other', $3)`,
+		"a linked spouse with a flat name": `INSERT INTO life_events (case_id, person_id, event_type, spouse_person_id, spouse_name)
+			VALUES ($1, $2, 'marriage', $3, 'Maria')`,
+		"the event's own person as spouse": `INSERT INTO life_events (case_id, person_id, event_type, spouse_person_id)
+			VALUES ($1, $2, 'marriage', $2)`,
+	}
+	_, err := db.Exec(`INSERT INTO life_events (case_id, person_id, event_type, spouse_person_id)
+		VALUES ($1, $2, 'marriage', $3)`, caseID, personID, spouseID)
+	require.NoError(t, err, "a linked spouse on a marriage is accepted, so the refusals below are the checks at work")
+	for what, query := range refused {
+		args := []any{caseID, personID}
+		if strings.Contains(query, "$3") {
+			args = append(args, spouseID)
+		}
+		_, err := db.Exec(query, args...)
+		assert.Error(t, err, what)
+	}
 }

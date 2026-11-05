@@ -180,7 +180,7 @@ PersonRelationship is a bare join table with no soft-delete. Deletions are hard-
 ### LifeEvent
 A significant event in a person's life that may require one or more documents to prove. The in-line subject (`person_id`) is the lineage-relevant person. A divorce is recorded on the marriage event it ended, not as a separate event.
 
-A spouse is usually not a Person record: their details are stored as flat fields on the marriage event. When the spouse is themselves in a line being explored, they are a Person, and the marriage event links to them through `spouse_person_id`. There is then one marriage event and one set of Documents for the marriage, shown under both people. On those Documents the second spouse is recorded as a DocumentNamedPerson with role `spouse`, linked to their Person.
+A spouse is usually not a Person record: their details are stored as flat fields on the marriage event. When the case keeps records of the spouse's own, such as an ancestor on a ClaimLine's path or a candidate root ancestor, the spouse is a Person, and the marriage event links to them through `spouse_person_id`. There is then one marriage event and one set of Documents for the marriage, shown under both people. On those Documents the second spouse is recorded as a DocumentNamedPerson with role `spouse`, linked to their Person.
 
 LifeEvent dates are working beliefs, not recorded facts, so they are qualified dates that can start approximate and be narrowed as documents arrive.
 
@@ -375,18 +375,18 @@ A **supporting** file is anything else worth keeping with the document, such as 
 ### Applications
 
 17. An Application's applicants are Persons in the same Case. Each takes part through their pursued ClaimLine. An applicant without one contributes no Documents, and the Application reports this prominently.
-18. An Application's Documents are the needed, for-submission Documents of every Person on its applicants' pursued paths, each counted once. People shared by several applicants' paths, such as a parent and child applying together, contribute their Documents once.
+18. An Application's Documents are the needed, for-submission Documents of every Person on its applicants' pursued paths, together with those of every shared marriage where either spouse is on one of those paths, each counted once. People shared by several applicants' paths, such as a parent and child applying together, contribute their Documents once.
 19. An Application's status is derived: `ready_for_submission` when it has at least one Document and every one of its Documents is ready; otherwise `preparing`, reported with the number ready out of the total.
 20. The number of copies required of a Document is the number of Applications in the Case whose Documents include it. A Document's phases describe its set of copies as a whole.
 
 ### Marriages and Spouses
 
-21. A spouse is a Person record only when they are in a line being explored. Otherwise their details live on the marriage LifeEvent as flat fields (`spouse_name`, `spouse_birth_date`, `spouse_birth_place`).
-22. When both spouses are Persons in the Case, the marriage is a single LifeEvent with `person_id` set to one and `spouse_person_id` set to the other. The flat spouse fields are not used; the spouse's name and birth details come from the linked Person.
+21. A spouse is a Person record only when the case keeps records of their own. Otherwise their details live on the marriage LifeEvent as flat fields (`spouse_name`, `spouse_birth_date`, `spouse_birth_place`).
+22. When both spouses are Persons in the Case, the marriage is a single LifeEvent with `person_id` set to one and `spouse_person_id` set to the other. The flat spouse fields are not used; the spouse's name and birth details come from the linked Person. Setting `spouse_person_id` together with any flat spouse field is refused.
 23. `spouse_person_id` must refer to a Person in the same Case, other than the event's `person_id`.
 24. A Person's LifeEvents are those where they are the `person_id` or the `spouse_person_id`. A shared marriage and its Documents appear under both people.
-25. A flat-field spouse can be promoted to a Person: a Person is created from the flat fields and the marriage event is linked to them, in a single transaction.
-26. A shared marriage is hidden, frozen, or permanently deleted along with a Person only when that is true of both spouses. If one spouse is trashed, the marriage stays active under the other. If one spouse is permanently deleted, the marriage and its Documents stay with the surviving spouse, and the deleted spouse's name is kept in `spouse_name`.
+25. A flat-field spouse can be promoted to a Person by creating the Person and then linking the marriage to them; the save that sets the link clears the flat fields. A one-step promotion is deferred.
+26. A shared marriage is hidden, frozen, or permanently deleted along with a Person only when that is true of both spouses. If one spouse is trashed, the marriage stays active under the other. If one spouse is permanently deleted, the marriage and its Documents stay with the surviving spouse, who becomes the event's `person_id` if they were not already, and the deleted spouse's name, birth date, and birth place are kept in the flat spouse fields.
 
 ### Document Phases
 
@@ -448,7 +448,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 
 60. A Document's recorded details are its own `recorded_*` fields, which describe its subject, and its DocumentNamedPerson entries, which describe the other people it names. `details_checked` attests to all of them.
 61. A DocumentNamedPerson may be linked only to a Person in the same Case, and not to the Document's own subject.
-62. Everything recorded about a Person is the `recorded_*` fields of that Person's own Documents together with every DocumentNamedPerson entry linked to them. The person screen shows these side by side, one row per Document, with the recorded name, the birth date or the age with its implied birth window, and the birth place. The Person's birth certificate is listed first and marked as the reference, since their other documents must agree with it. Comparison is by eye; automatic discrepancy flagging is deferred post-MVP.
+62. Everything recorded about a Person is the `recorded_*` fields of that Person's own Documents together with every DocumentNamedPerson entry linked to them. The person screen shows these side by side, one row per mention, with the recorded name, the birth date or the age with its implied birth window, and the birth place. Rows for the people around them follow in adjacent groups, so that what different documents record about the same individual can be compared even when that individual is not a Person: their parents (the father and mother entries on the Person's own Documents, and each parent's own rows when the parent is a Person); and their spouses and the other parent of their children (each marriage's spouse details, the spouse entries on the Person's own Documents, and the parent entries on their children's Documents that are not linked to the Person). The Person's birth certificate is listed first and marked as the reference, since their other documents must agree with it. Comparison is by eye; automatic discrepancy flagging is deferred post-MVP.
 63. Changes to a Document's DocumentNamedPerson entries are logged as part of that Document's `updated` ActivityLog entry.
 
 ### Activity Log
@@ -523,6 +523,7 @@ A **supporting** file is anything else worth keeping with the document, such as 
 - Global person/document scope across cases
 - Second case type for eligibility workflow
 - Automatic discrepancy flagging across documents
+- Name-only people: someone named on documents without records of their own, linked from every mention, so discrepancies about them can be flagged automatically
 - Presigned URL upload flow (if direct upload becomes a bottleneck)
 - User registration flow
 - User-management UI (add, disable, reset password)

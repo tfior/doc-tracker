@@ -49,9 +49,12 @@ type eventFields struct {
 	EventType        *string                    `json:"event_type"`
 	EventDate        platform.NullQualifiedDate `json:"event_date"`
 	EventPlace       platform.NullString        `json:"event_place"`
+	SpousePersonID   platform.NullString        `json:"spouse_person_id"`
 	SpouseName       platform.NullString        `json:"spouse_name"`
 	SpouseBirthDate  platform.NullQualifiedDate `json:"spouse_birth_date"`
 	SpouseBirthPlace platform.NullString        `json:"spouse_birth_place"`
+	DivorceDate      platform.NullQualifiedDate `json:"divorce_date"`
+	DivorcePlace     platform.NullString        `json:"divorce_place"`
 	Notes            platform.NullString        `json:"notes"`
 }
 
@@ -60,13 +63,17 @@ func (f *eventFields) validate(v *platform.Validator) {
 		v.OneOf("event_type", *f.EventType, validEventTypes)
 	}
 	v.QualifiedDate("event_date", &f.EventDate)
+	v.ID("spouse_person_id", f.SpousePersonID.Value)
 	v.QualifiedDate("spouse_birth_date", &f.SpouseBirthDate)
+	v.QualifiedDate("divorce_date", &f.DivorceDate)
 }
 
 func (f *eventFields) input() UpdateLifeEventInput {
 	return UpdateLifeEventInput{
 		EventType: f.EventType, EventDate: f.EventDate, EventPlace: f.EventPlace,
-		SpouseName: f.SpouseName, SpouseBirthDate: f.SpouseBirthDate, SpouseBirthPlace: f.SpouseBirthPlace,
+		SpousePersonID: f.SpousePersonID,
+		SpouseName:     f.SpouseName, SpouseBirthDate: f.SpouseBirthDate, SpouseBirthPlace: f.SpouseBirthPlace,
+		DivorceDate: f.DivorceDate, DivorcePlace: f.DivorcePlace,
 		Notes: f.Notes,
 	}
 }
