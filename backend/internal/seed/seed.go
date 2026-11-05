@@ -277,7 +277,7 @@ var (
 	ready      = phases{"official_copy": "Complete", "amendment": "Not Required", "apostille": "Complete", "translation": "Complete"}
 	readyItaly = phases{"official_copy": "Complete", "amendment": "Not Required", "apostille": "Not Required", "translation": "Not Required"}
 	notStarted = phases{}
-	checked    = fields{"is_verified": true}
+	checked    = fields{"details_checked": true}
 )
 
 // with returns the fields of a and b together.

@@ -9,6 +9,9 @@ export const DOC_TYPE_OPTIONS = [
   { value: 'marriage_certificate', label: 'Marriage Certificate' },
   { value: 'naturalization', label: 'Naturalization' },
   { value: 'death_certificate', label: 'Death Certificate' },
+  { value: 'non_naturalization_certificate', label: 'Non-Naturalization Certificate' },
+  { value: 'divorce_record', label: 'Divorce Record' },
+  { value: 'court_order', label: 'Court Order' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -22,7 +25,7 @@ export type Phase = typeof PHASES[number];
 export const PHASE_LABELS: Record<Phase, string> = {
   official_copy: 'Official Copy',
   amendment: 'Amendment',
-  apostille: 'Apostille',
+  apostille: 'Apostille / Legalization',
   translation: 'Translation',
 };
 
@@ -33,6 +36,16 @@ export function phaseStatusField(phase: Phase) {
 
 export function phaseStatus(doc: Document, phase: Phase): PhaseStatus {
   return doc[`${phase}_status`];
+}
+
+/** The request field that dates a phase's status. */
+export function phaseSinceField(phase: Phase) {
+  return `${phase}_status_since` as const satisfies keyof DocumentInput & keyof Document;
+}
+
+/** The request field that holds a phase's reference. */
+export function phaseReferenceField(phase: Phase) {
+  return `${phase}_reference` as const satisfies keyof DocumentInput & keyof Document;
 }
 
 /** The statuses a phase can take, as select options. */

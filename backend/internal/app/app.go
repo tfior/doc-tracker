@@ -38,7 +38,8 @@ func NewHandler(db *sql.DB) http.Handler {
 	casesSvc := cases.NewService(cases.NewStore(db), db, actlogSvc)
 	peopleSvc := people.NewService(people.NewStore(db), db, actlogSvc, casesSvc)
 	lifeEventsSvc := lifeevents.NewService(lifeevents.NewStore(db), db, actlogSvc, casesSvc, peopleSvc)
-	documentsSvc := documents.NewService(documents.NewStore(db), db, actlogSvc, casesSvc, peopleSvc, lifeEventsSvc)
+	documentsSvc := documents.NewService(documents.NewStore(db), db, actlogSvc, casesSvc, peopleSvc, lifeEventsSvc,
+		auth.UserIDFromContext)
 	lifeEventsSvc.SetDocumentMover(documentsSvc)
 	peopleSvc.SetVitalEvents(lifeEventsSvc)
 	claimLinesSvc := claimlines.NewService(claimlines.NewStore(db), db, actlogSvc, casesSvc, peopleSvc)

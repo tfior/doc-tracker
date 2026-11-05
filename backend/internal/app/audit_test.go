@@ -117,8 +117,9 @@ func TestLog_StatusChangeRecordsLabels(t *testing.T) {
 		map[string]any{"official_copy_status_id": e.statusID(t, "official_copy", "Requested")})
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	assert.Equal(t, []testhelpers.Change{{Field: "official_copy_status", From: "Not Started", To: "Requested"}},
-		e.lastEntry(t, c, "document", doc).Changes)
+	// The phase's since timestamp changes with it, and is logged too.
+	assert.Contains(t, e.lastEntry(t, c, "document", doc).Changes,
+		testhelpers.Change{Field: "official_copy_status", From: "Not Started", To: "Requested"})
 }
 
 // Scenario 5

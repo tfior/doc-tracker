@@ -37,10 +37,42 @@ type Service struct {
 	cases      CaseChecker
 	people     PersonChecker
 	lifeEvents LifeEventChecker
+	userID     func(context.Context) (string, bool)
 }
 
-func NewService(store Store, db *sql.DB, log *activitylog.Service, cases CaseChecker, people PersonChecker, lifeEvents LifeEventChecker) *Service {
-	return &Service{store: store, db: db, log: log, rec: log.For("document", store.LogName), cases: cases, people: people, lifeEvents: lifeEvents}
+// NewService returns the documents service. userID gives the user making a
+// request, who is recorded as having checked a document's details.
+func NewService(store Store, db *sql.DB, log *activitylog.Service, cases CaseChecker, people PersonChecker, lifeEvents LifeEventChecker,
+	userID func(context.Context) (string, bool)) *Service {
+	return &Service{store: store, db: db, log: log, rec: log.For("document", store.LogName),
+		cases: cases, people: people, lifeEvents: lifeEvents, userID: userID}
+}
+
+// currentUser returns the user making the request.
+func (s *Service) currentUser(ctx context.Context) (string, error) {
+	id, ok := s.userID(ctx)
+	if !ok {
+		return "", errors.New("no user in the request context")
+	}
+	return id, nil
+}
+
+// checkFor decides what a save does to the details check of before. Sending
+// true records a new check unless the document is already checked and the
+// save leaves its recorded details as they are. Changing a recorded detail
+// without sending true clears the check, since it no longer covers them.
+func checkFor(input UpdateDocumentInput, before *Document) checkChange {
+	changed := input.changesRecordedDetails(before)
+	switch {
+	case input.DetailsChecked != nil && *input.DetailsChecked:
+		if before.DetailsChecked && !changed {
+			return checkKept
+		}
+		return checkSet
+	case input.DetailsChecked != nil, changed && before.DetailsChecked:
+		return checkCleared
+	}
+	return checkKept
 }
 
 func (s *Service) ListDocuments(ctx context.Context, caseID string) ([]Document, error) {
@@ -78,8 +110,15 @@ func (s *Service) CreateDocument(ctx context.Context, caseID, personID, docType,
 		if err := s.requireParents(ctx, caseID, personID, input.LifeEventID); err != nil {
 			return err
 		}
+		var checkedBy string
+		if input.DetailsChecked != nil && *input.DetailsChecked {
+			var err error
+			if checkedBy, err = s.currentUser(ctx); err != nil {
+				return err
+			}
+		}
 		var err error
-		if d, err = s.store.CreateDocument(ctx, caseID, personID, docType, title, input); err != nil {
+		if d, err = s.store.CreateDocument(ctx, caseID, personID, docType, title, input, checkedBy); err != nil {
 			return err
 		}
 		return s.rec.Record(ctx, caseID, "created", d.ID, nil)
@@ -121,7 +160,14 @@ func (s *Service) UpdateDocument(ctx context.Context, caseID, docID string, inpu
 				return err
 			}
 		}
-		if d, err = s.store.UpdateDocument(ctx, caseID, docID, input); err != nil {
+		check := checkFor(input, before)
+		var userID string
+		if check == checkSet {
+			if userID, err = s.currentUser(ctx); err != nil {
+				return err
+			}
+		}
+		if d, err = s.store.UpdateDocument(ctx, caseID, docID, input, check, userID); err != nil {
 			return err
 		}
 		return s.rec.Record(ctx, caseID, "updated", docID, activitylog.Diff(before.logFields(), d.logFields()))
@@ -136,10 +182,10 @@ func (s *Service) checkStatuses(ctx context.Context, input UpdateDocumentInput) 
 		field, phase string
 		id           *string
 	}{
-		{"official_copy_status_id", "official_copy", input.OfficialCopyStatusID},
-		{"amendment_status_id", "amendment", input.AmendmentStatusID},
-		{"apostille_status_id", "apostille", input.ApostilleStatusID},
-		{"translation_status_id", "translation", input.TranslationStatusID},
+		{"official_copy_status_id", "official_copy", input.OfficialCopy.StatusID},
+		{"amendment_status_id", "amendment", input.Amendment.StatusID},
+		{"apostille_status_id", "apostille", input.Apostille.StatusID},
+		{"translation_status_id", "translation", input.Translation.StatusID},
 	} {
 		if st.id == nil {
 			continue

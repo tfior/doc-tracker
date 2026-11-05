@@ -7,13 +7,16 @@ package documents
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/tfior/doc-tracker/platform"
 )
 
 var validDocumentTypes = map[string]bool{
 	"birth_certificate": true, "marriage_certificate": true,
-	"naturalization": true, "death_certificate": true, "other": true,
+	"naturalization": true, "death_certificate": true,
+	"non_naturalization_certificate": true, "divorce_record": true, "court_order": true,
+	"other": true,
 }
 
 type Handler struct {
@@ -57,7 +60,8 @@ type documentFields struct {
 	RecordedBirthDate  platform.NullString `json:"recorded_birth_date"`
 	RecordedBirthPlace platform.NullString `json:"recorded_birth_place"`
 	Notes              platform.NullString `json:"notes"`
-	IsVerified         *bool               `json:"is_verified"`
+	DetailsChecked     *bool               `json:"details_checked"`
+	ForSubmission      *bool               `json:"for_submission"`
 }
 
 func (f *documentFields) validate(v *platform.Validator) {
@@ -80,7 +84,7 @@ func (f *documentFields) input() UpdateDocumentInput {
 		IssuingAuthority: f.IssuingAuthority, IssueDate: f.IssueDate, RegistrationDate: f.RegistrationDate,
 		RecordedGivenName: f.RecordedGivenName, RecordedSurname: f.RecordedSurname,
 		RecordedBirthDate: f.RecordedBirthDate, RecordedBirthPlace: f.RecordedBirthPlace,
-		Notes: f.Notes, IsVerified: f.IsVerified,
+		Notes: f.Notes, DetailsChecked: f.DetailsChecked, ForSubmission: f.ForSubmission,
 	}
 }
 
@@ -139,14 +143,52 @@ func (h *Handler) createDocument(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusCreated, d)
 }
 
+// phaseFields is one phase's part of an update body.
+type phaseFields struct {
+	statusID  *string
+	since     platform.NullString
+	reference platform.NullString
+}
+
+// validate checks the phase's fields, named with prefix, and returns them as
+// input. A since may not be null or in the future.
+func (p *phaseFields) validate(v *platform.Validator, prefix string, now time.Time) PhaseInput {
+	in := PhaseInput{StatusID: p.statusID, Reference: p.reference}
+	if p.statusID != nil {
+		v.Required(prefix+"_status_id", *p.statusID)
+		v.ID(prefix+"_status_id", *p.statusID)
+	}
+	field := prefix + "_status_since"
+	switch t, ok := platform.ParseTimestamp(p.since.Value); {
+	case !p.since.Set:
+	case !p.since.Valid:
+		v.Add(field, "required", "This field cannot be empty.")
+	case !ok:
+		v.Add(field, "invalid_timestamp", "Enter a date and time, for example 2026-03-15T00:00:00Z.")
+	case t.After(now):
+		v.Add(field, "in_future", "This date cannot be in the future.")
+	default:
+		in.Since = &t
+	}
+	return in
+}
+
 func (h *Handler) updateDocument(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Version              *int    `json:"version"`
-		PersonID             *string `json:"person_id"`
-		OfficialCopyStatusID *string `json:"official_copy_status_id"`
-		AmendmentStatusID    *string `json:"amendment_status_id"`
-		ApostilleStatusID    *string `json:"apostille_status_id"`
-		TranslationStatusID  *string `json:"translation_status_id"`
+		Version                 *int                `json:"version"`
+		PersonID                *string             `json:"person_id"`
+		OfficialCopyStatusID    *string             `json:"official_copy_status_id"`
+		OfficialCopyStatusSince platform.NullString `json:"official_copy_status_since"`
+		OfficialCopyReference   platform.NullString `json:"official_copy_reference"`
+		AmendmentStatusID       *string             `json:"amendment_status_id"`
+		AmendmentStatusSince    platform.NullString `json:"amendment_status_since"`
+		AmendmentReference      platform.NullString `json:"amendment_reference"`
+		ApostilleStatusID       *string             `json:"apostille_status_id"`
+		ApostilleStatusSince    platform.NullString `json:"apostille_status_since"`
+		ApostilleReference      platform.NullString `json:"apostille_reference"`
+		TranslationStatusID     *string             `json:"translation_status_id"`
+		TranslationStatusSince  platform.NullString `json:"translation_status_since"`
+		TranslationReference    platform.NullString `json:"translation_reference"`
 		documentFields
 	}
 	if err := platform.Decode(r, &body); err != nil {
@@ -159,15 +201,11 @@ func (h *Handler) updateDocument(w http.ResponseWriter, r *http.Request) {
 		v.Required("person_id", *body.PersonID)
 		v.ID("person_id", *body.PersonID)
 	}
-	for field, id := range map[string]*string{
-		"official_copy_status_id": body.OfficialCopyStatusID, "amendment_status_id": body.AmendmentStatusID,
-		"apostille_status_id": body.ApostilleStatusID, "translation_status_id": body.TranslationStatusID,
-	} {
-		if id != nil {
-			v.Required(field, *id)
-			v.ID(field, *id)
-		}
-	}
+	now := time.Now()
+	officialCopy := (&phaseFields{body.OfficialCopyStatusID, body.OfficialCopyStatusSince, body.OfficialCopyReference}).validate(&v, "official_copy", now)
+	amendment := (&phaseFields{body.AmendmentStatusID, body.AmendmentStatusSince, body.AmendmentReference}).validate(&v, "amendment", now)
+	apostille := (&phaseFields{body.ApostilleStatusID, body.ApostilleStatusSince, body.ApostilleReference}).validate(&v, "apostille", now)
+	translation := (&phaseFields{body.TranslationStatusID, body.TranslationStatusSince, body.TranslationReference}).validate(&v, "translation", now)
 	body.validate(&v)
 	if err := v.Err(); err != nil {
 		respondError(w, r, err, "")
@@ -176,10 +214,7 @@ func (h *Handler) updateDocument(w http.ResponseWriter, r *http.Request) {
 	input := body.input()
 	input.Version = *body.Version
 	input.PersonID = body.PersonID
-	input.OfficialCopyStatusID = body.OfficialCopyStatusID
-	input.AmendmentStatusID = body.AmendmentStatusID
-	input.ApostilleStatusID = body.ApostilleStatusID
-	input.TranslationStatusID = body.TranslationStatusID
+	input.OfficialCopy, input.Amendment, input.Apostille, input.Translation = officialCopy, amendment, apostille, translation
 	d, err := h.svc.UpdateDocument(r.Context(), r.PathValue("caseId"), r.PathValue("docId"), input)
 	if err != nil {
 		respondError(w, r, err, "Document, person, or life event not found")

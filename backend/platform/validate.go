@@ -161,3 +161,14 @@ type Items struct {
 	Items any `json:"items"`
 	Total int `json:"total"`
 }
+
+// ParseTimestamp reads a timestamp sent by a client, in RFC 3339. One sent
+// without a time zone offset is read as UTC.
+func ParseTimestamp(s string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}

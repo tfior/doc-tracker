@@ -11,6 +11,12 @@ export interface PhaseStatus {
   progress_bucket: string;
 }
 
+/** A user named in a response. */
+export interface UserRef {
+  id: string;
+  name: string;
+}
+
 export interface Document {
   id: string;
   case_id: string;
@@ -25,13 +31,23 @@ export interface Document {
   recorded_surname: string | null;
   recorded_birth_date: string | null;
   recorded_birth_place: string | null;
-  is_verified: boolean;
-  verified_at: string | null;
+  details_checked: boolean;
+  details_checked_at: string | null;
+  details_checked_by: UserRef | null;
+  for_submission: boolean;
   notes: string | null;
   official_copy_status: PhaseStatus;
+  official_copy_status_since: string;
+  official_copy_reference: string | null;
   amendment_status: PhaseStatus;
+  amendment_status_since: string;
+  amendment_reference: string | null;
   apostille_status: PhaseStatus;
+  apostille_status_since: string;
+  apostille_reference: string | null;
   translation_status: PhaseStatus;
+  translation_status_since: string;
+  translation_reference: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -59,11 +75,22 @@ export interface DocumentInput {
   recorded_birth_date?: string | null;
   recorded_birth_place?: string | null;
   notes?: string | null;
-  is_verified?: boolean;
+  /** Sending true with a changed recorded detail records a new check; changing one without it clears the check. */
+  details_checked?: boolean;
+  for_submission?: boolean;
   official_copy_status_id?: string;
   amendment_status_id?: string;
   apostille_status_id?: string;
   translation_status_id?: string;
+  /** Sent only to correct the date; a status change otherwise dates itself. */
+  official_copy_status_since?: string | null;
+  amendment_status_since?: string | null;
+  apostille_status_since?: string | null;
+  translation_status_since?: string | null;
+  official_copy_reference?: string | null;
+  amendment_reference?: string | null;
+  apostille_reference?: string | null;
+  translation_reference?: string | null;
 }
 
 export function listDocuments(caseId: string): Promise<Items<Document>> {

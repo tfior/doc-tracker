@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -291,4 +292,85 @@ func TestMigration_SpouseDetailsOnlyOnMarriages(t *testing.T) {
 		_, err := db.Exec(query, args...)
 		assert.Error(t, err, what)
 	}
+}
+
+// insertDocument adds a document in the shape before document tracking, with
+// its phases at their defaults and the given check and update time.
+func insertDocument(t *testing.T, db *sql.DB, caseID, personID string, verified bool, verifiedAt, updatedAt any) string {
+	t.Helper()
+	var id string
+	require.NoError(t, db.QueryRow(`
+		INSERT INTO documents
+			(case_id, person_id, document_type, title, is_verified, verified_at, updated_at,
+			 official_copy_status_id, amendment_status_id, apostille_status_id, translation_status_id)
+		VALUES ($1, $2, 'birth_certificate', 'Birth certificate', $3, $4, $5,
+			(SELECT id FROM document_statuses WHERE system_key = 'official_copy_default'),
+			(SELECT id FROM document_statuses WHERE system_key = 'amendment_default'),
+			(SELECT id FROM document_statuses WHERE system_key = 'apostille_default'),
+			(SELECT id FROM document_statuses WHERE system_key = 'translation_default'))
+		RETURNING id`,
+		caseID, personID, verified, verifiedAt, updatedAt).Scan(&id))
+	return id
+}
+
+func casePerson(t *testing.T, db *sql.DB) (caseID, personID string) {
+	t.Helper()
+	require.NoError(t, db.QueryRow(`INSERT INTO cases (title) VALUES ('Rossi') RETURNING id`).Scan(&caseID))
+	require.NoError(t, db.QueryRow(
+		`INSERT INTO people (case_id, first_name, last_name) VALUES ($1, 'Giuseppe', 'Rossi') RETURNING id`,
+		caseID).Scan(&personID))
+	return caseID, personID
+}
+
+// Scenario 9 (document tracking): a verified document stays checked, at the
+// time it was verified, with no one recorded as having checked it.
+func TestMigration_VerifiedBecomesDetailsChecked(t *testing.T) {
+	db, m := migrateTo(t, 13)
+	caseID, personID := casePerson(t, db)
+	verifiedAt := time.Date(2026, 3, 2, 14, 30, 0, 0, time.UTC)
+	verified := insertDocument(t, db, caseID, personID, true, verifiedAt, verifiedAt)
+	unverified := insertDocument(t, db, caseID, personID, false, nil, verifiedAt)
+
+	up(t, m)
+
+	var checked bool
+	var at sql.NullTime
+	var by sql.NullString
+	require.NoError(t, db.QueryRow(
+		`SELECT details_checked, details_checked_at, details_checked_by FROM documents WHERE id = $1`, verified,
+	).Scan(&checked, &at, &by))
+	assert.True(t, checked)
+	assert.True(t, verifiedAt.Equal(at.Time), "checked at the time it was verified")
+	assert.False(t, by.Valid, "no one is recorded as having checked it")
+
+	require.NoError(t, db.QueryRow(
+		`SELECT details_checked, details_checked_at, details_checked_by FROM documents WHERE id = $1`, unverified,
+	).Scan(&checked, &at, &by))
+	assert.False(t, checked)
+	assert.False(t, at.Valid)
+	assert.False(t, by.Valid)
+}
+
+// Scenario 17 (document tracking): existing documents' phases are dated from
+// the document's last update, the best time known.
+func TestMigration_PhasesSinceLastUpdate(t *testing.T) {
+	db, m := migrateTo(t, 13)
+	caseID, personID := casePerson(t, db)
+	updatedAt := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	doc := insertDocument(t, db, caseID, personID, false, nil, updatedAt)
+
+	up(t, m)
+
+	for _, phase := range []string{"official_copy", "amendment", "apostille", "translation"} {
+		var since time.Time
+		var reference sql.NullString
+		require.NoError(t, db.QueryRow(
+			`SELECT `+phase+`_status_since, `+phase+`_reference FROM documents WHERE id = $1`, doc,
+		).Scan(&since, &reference))
+		assert.True(t, updatedAt.Equal(since), "%s since is the last update", phase)
+		assert.False(t, reference.Valid, phase)
+	}
+	var forSubmission bool
+	require.NoError(t, db.QueryRow(`SELECT for_submission FROM documents WHERE id = $1`, doc).Scan(&forSubmission))
+	assert.True(t, forSubmission, "existing documents are for submission")
 }

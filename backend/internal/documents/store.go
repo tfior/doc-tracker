@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/tfior/doc-tracker/platform"
 )
@@ -28,8 +29,8 @@ type Store interface {
 	LockActive(ctx context.Context, caseID, id string) (personID string, err error)
 	ListDocuments(ctx context.Context, caseID string) ([]Document, error)
 	ListDocumentStatuses(ctx context.Context, phase string) ([]DocumentStatus, error)
-	CreateDocument(ctx context.Context, caseID, personID, docType, title string, input UpdateDocumentInput) (*Document, error)
-	UpdateDocument(ctx context.Context, caseID, docID string, input UpdateDocumentInput) (*Document, error)
+	CreateDocument(ctx context.Context, caseID, personID, docType, title string, input UpdateDocumentInput, checkedBy string) (*Document, error)
+	UpdateDocument(ctx context.Context, caseID, docID string, input UpdateDocumentInput, check checkChange, userID string) (*Document, error)
 	DeleteDocument(ctx context.Context, caseID, docID string) error
 	RequireActive(ctx context.Context, caseID, docID string) (personID string, err error)
 	TrashedParents(ctx context.Context, caseID, docID string) (personID string, lifeEventID *string, err error)
@@ -47,25 +48,31 @@ func NewStore(db *sql.DB) Store {
 	return &store{db: db}
 }
 
+// selectDocuments reads documents in the order scanDocument expects, with each
+// phase's status and the name of the user who checked the details.
+const selectDocuments = `
+	SELECT
+		d.id::text, d.case_id::text, d.person_id::text, d.life_event_id::text,
+		d.document_type::text, d.title,
+		d.issuing_authority, d.issue_date,
+		d.registration_date, d.recorded_given_name, d.recorded_surname,
+		d.recorded_birth_date, d.recorded_birth_place,
+		d.details_checked, d.details_checked_at, u.id::text, u.first_name || ' ' || u.last_name,
+		d.for_submission, d.notes,
+		oc.id::text, oc.label, oc.phase::text, oc.progress_bucket::text, d.official_copy_status_since, d.official_copy_reference,
+		am.id::text, am.label, am.phase::text, am.progress_bucket::text, d.amendment_status_since, d.amendment_reference,
+		ap.id::text, ap.label, ap.phase::text, ap.progress_bucket::text, d.apostille_status_since, d.apostille_reference,
+		tr.id::text, tr.label, tr.phase::text, tr.progress_bucket::text, d.translation_status_since, d.translation_reference,
+		d.version, d.created_at, d.updated_at
+	FROM documents d
+	JOIN document_statuses oc ON oc.id = d.official_copy_status_id
+	JOIN document_statuses am ON am.id = d.amendment_status_id
+	JOIN document_statuses ap ON ap.id = d.apostille_status_id
+	JOIN document_statuses tr ON tr.id = d.translation_status_id
+	LEFT JOIN users u ON u.id = d.details_checked_by`
+
 func (s *store) ListDocuments(ctx context.Context, caseID string) ([]Document, error) {
-	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
-		SELECT
-			d.id::text, d.case_id::text, d.person_id::text, d.life_event_id::text,
-			d.document_type::text, d.title,
-			d.issuing_authority, d.issue_date,
-			d.registration_date, d.recorded_given_name, d.recorded_surname,
-			d.recorded_birth_date, d.recorded_birth_place,
-			d.is_verified, d.verified_at, d.notes,
-			oc.id::text, oc.label, oc.phase::text, oc.progress_bucket::text,
-			am.id::text, am.label, am.phase::text, am.progress_bucket::text,
-			ap.id::text, ap.label, ap.phase::text, ap.progress_bucket::text,
-			tr.id::text, tr.label, tr.phase::text, tr.progress_bucket::text,
-			d.version, d.created_at, d.updated_at
-		FROM documents d
-		JOIN document_statuses oc ON oc.id = d.official_copy_status_id
-		JOIN document_statuses am ON am.id = d.amendment_status_id
-		JOIN document_statuses ap ON ap.id = d.apostille_status_id
-		JOIN document_statuses tr ON tr.id = d.translation_status_id
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, selectDocuments+`
 		WHERE d.id IN (SELECT id FROM active_documents WHERE case_id = $1)
 		ORDER BY d.created_at ASC, d.id ASC`,
 		caseID)
@@ -126,7 +133,9 @@ func (s *store) ListDocumentStatuses(ctx context.Context, phase string) ([]Docum
 	return items, nil
 }
 
-func (s *store) CreateDocument(ctx context.Context, caseID, personID, docType, title string, input UpdateDocumentInput) (*Document, error) {
+// CreateDocument inserts a document. A non-empty checkedBy records a details
+// check by that user, now.
+func (s *store) CreateDocument(ctx context.Context, caseID, personID, docType, title string, input UpdateDocumentInput, checkedBy string) (*Document, error) {
 
 	defaults, err := s.phaseDefaults(ctx)
 	if err != nil {
@@ -146,13 +155,16 @@ func (s *store) CreateDocument(ctx context.Context, caseID, personID, docType, t
 			 document_type, title,
 			 issuing_authority, issue_date,
 			 registration_date, recorded_given_name, recorded_surname,
-			 recorded_birth_date, recorded_birth_place, notes)
+			 recorded_birth_date, recorded_birth_place, notes,
+			 for_submission, details_checked, details_checked_at, details_checked_by)
 		VALUES ($1, $2, $3::uuid,
 			$4, $5, $6, $7,
 			$8::document_type, $9,
 			$10, $11,
 			$12, $13, $14,
-			$15, $16, $17)
+			$15, $16, $17,
+			COALESCE($18::boolean, TRUE), $19 <> '',
+			CASE WHEN $19 <> '' THEN NOW() END, NULLIF($19, '')::uuid)
 		RETURNING id::text`,
 		caseID, personID, lifeEventID,
 		defaults["official_copy"], defaults["amendment"], defaults["apostille"], defaults["translation"],
@@ -165,6 +177,7 @@ func (s *store) CreateDocument(ctx context.Context, caseID, personID, docType, t
 		nullToSQL(input.RecordedBirthDate),
 		nullToSQL(input.RecordedBirthPlace),
 		nullToSQL(input.Notes),
+		input.ForSubmission, checkedBy,
 	).Scan(&docID)
 	if err != nil {
 		return nil, fmt.Errorf("insert document: %w", err)
@@ -173,13 +186,10 @@ func (s *store) CreateDocument(ctx context.Context, caseID, personID, docType, t
 	return s.getDocument(ctx, caseID, docID)
 }
 
-func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input UpdateDocumentInput) (*Document, error) {
-	var isVerifiedSet, isVerifiedValue bool
-	if input.IsVerified != nil {
-		isVerifiedSet = true
-		isVerifiedValue = *input.IsVerified
-	}
-
+// UpdateDocument saves the fields input sets, and does check to the details
+// check; a new check is recorded against userID. A phase whose status changes
+// is dated now, unless the input dates it.
+func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input UpdateDocumentInput, check checkChange, userID string) (*Document, error) {
 	result, err := platform.Conn(ctx, s.db).ExecContext(ctx, `
 		UPDATE documents SET
 			title                = COALESCE($3, title),
@@ -192,18 +202,28 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 			recorded_birth_date  = CASE WHEN $15 THEN $16        ELSE recorded_birth_date  END,
 			recorded_birth_place = CASE WHEN $17 THEN $18        ELSE recorded_birth_place END,
 			notes                = CASE WHEN $19 THEN $20        ELSE notes                END,
-			is_verified          = CASE WHEN $21 THEN $22        ELSE is_verified          END,
+			details_checked      = CASE $21::int WHEN 1 THEN TRUE WHEN 2 THEN FALSE ELSE details_checked END,
+			details_checked_at   = CASE $21::int WHEN 1 THEN NOW() WHEN 2 THEN NULL ELSE details_checked_at END,
+			details_checked_by   = CASE $21::int WHEN 1 THEN $22::uuid WHEN 2 THEN NULL ELSE details_checked_by END,
 			person_id            = COALESCE($23::uuid, person_id),
 			life_event_id        = CASE WHEN $24 THEN $25::uuid  ELSE life_event_id        END,
 			official_copy_status_id = COALESCE($26::uuid, official_copy_status_id),
 			amendment_status_id     = COALESCE($27::uuid, amendment_status_id),
 			apostille_status_id     = COALESCE($28::uuid, apostille_status_id),
 			translation_status_id   = COALESCE($29::uuid, translation_status_id),
-			verified_at          = CASE
-				WHEN $21 AND $22 = TRUE  THEN NOW()
-				WHEN $21 AND $22 = FALSE THEN NULL
-				ELSE verified_at
-			END,
+			official_copy_status_since = CASE WHEN $30::timestamptz IS NOT NULL THEN $30
+				WHEN $26::uuid <> official_copy_status_id THEN NOW() ELSE official_copy_status_since END,
+			amendment_status_since     = CASE WHEN $31::timestamptz IS NOT NULL THEN $31
+				WHEN $27::uuid <> amendment_status_id     THEN NOW() ELSE amendment_status_since END,
+			apostille_status_since     = CASE WHEN $32::timestamptz IS NOT NULL THEN $32
+				WHEN $28::uuid <> apostille_status_id     THEN NOW() ELSE apostille_status_since END,
+			translation_status_since   = CASE WHEN $33::timestamptz IS NOT NULL THEN $33
+				WHEN $29::uuid <> translation_status_id   THEN NOW() ELSE translation_status_since END,
+			official_copy_reference = CASE WHEN $34 THEN $35 ELSE official_copy_reference END,
+			amendment_reference     = CASE WHEN $36 THEN $37 ELSE amendment_reference     END,
+			apostille_reference     = CASE WHEN $38 THEN $39 ELSE apostille_reference     END,
+			translation_reference   = CASE WHEN $40 THEN $41 ELSE translation_reference   END,
+			for_submission          = COALESCE($42::boolean, for_submission),
 			updated_at = NOW(), version = version + 1
 		WHERE id = $1 AND case_id = $2 AND deleted_at IS NULL`,
 		docID, caseID,
@@ -217,10 +237,16 @@ func (s *store) UpdateDocument(ctx context.Context, caseID, docID string, input 
 		input.RecordedBirthDate.Set, nullToSQL(input.RecordedBirthDate),
 		input.RecordedBirthPlace.Set, nullToSQL(input.RecordedBirthPlace),
 		input.Notes.Set, nullToSQL(input.Notes),
-		isVerifiedSet, isVerifiedValue,
+		int(check), sql.NullString{String: userID, Valid: check == checkSet},
 		input.PersonID,
 		input.LifeEventID.Set, nullToSQL(input.LifeEventID),
-		input.OfficialCopyStatusID, input.AmendmentStatusID, input.ApostilleStatusID, input.TranslationStatusID,
+		input.OfficialCopy.StatusID, input.Amendment.StatusID, input.Apostille.StatusID, input.Translation.StatusID,
+		input.OfficialCopy.Since, input.Amendment.Since, input.Apostille.Since, input.Translation.Since,
+		input.OfficialCopy.Reference.Set, nullToSQL(input.OfficialCopy.Reference),
+		input.Amendment.Reference.Set, nullToSQL(input.Amendment.Reference),
+		input.Apostille.Reference.Set, nullToSQL(input.Apostille.Reference),
+		input.Translation.Reference.Set, nullToSQL(input.Translation.Reference),
+		input.ForSubmission,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update document: %w", err)
@@ -256,24 +282,7 @@ func (s *store) DeleteDocument(ctx context.Context, caseID, docID string) error 
 }
 
 func (s *store) getDocument(ctx context.Context, caseID, docID string) (*Document, error) {
-	row := platform.Conn(ctx, s.db).QueryRowContext(ctx, `
-		SELECT
-			d.id::text, d.case_id::text, d.person_id::text, d.life_event_id::text,
-			d.document_type::text, d.title,
-			d.issuing_authority, d.issue_date,
-			d.registration_date, d.recorded_given_name, d.recorded_surname,
-			d.recorded_birth_date, d.recorded_birth_place,
-			d.is_verified, d.verified_at, d.notes,
-			oc.id::text, oc.label, oc.phase::text, oc.progress_bucket::text,
-			am.id::text, am.label, am.phase::text, am.progress_bucket::text,
-			ap.id::text, ap.label, ap.phase::text, ap.progress_bucket::text,
-			tr.id::text, tr.label, tr.phase::text, tr.progress_bucket::text,
-			d.version, d.created_at, d.updated_at
-		FROM documents d
-		JOIN document_statuses oc ON oc.id = d.official_copy_status_id
-		JOIN document_statuses am ON am.id = d.amendment_status_id
-		JOIN document_statuses ap ON ap.id = d.apostille_status_id
-		JOIN document_statuses tr ON tr.id = d.translation_status_id
+	row := platform.Conn(ctx, s.db).QueryRowContext(ctx, selectDocuments+`
 		WHERE d.id = $1 AND d.case_id = $2 AND d.deleted_at IS NULL`,
 		docID, caseID,
 	)
@@ -319,7 +328,9 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 	var lifeEventID, issuingAuthority, issueDate sql.NullString
 	var registrationDate, recordedGivenName, recordedSurname sql.NullString
 	var recordedBirthDate, recordedBirthPlace, notes sql.NullString
-	var verifiedAt sql.NullTime
+	var checkedAt sql.NullTime
+	var checkedByID, checkedByName sql.NullString
+	var ocRef, amRef, apRef, trRef sql.NullString
 
 	if err := scan(
 		&d.ID, &d.CaseID, &d.PersonID, &lifeEventID,
@@ -327,11 +338,16 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 		&issuingAuthority, &issueDate,
 		&registrationDate, &recordedGivenName, &recordedSurname,
 		&recordedBirthDate, &recordedBirthPlace,
-		&d.IsVerified, &verifiedAt, &notes,
+		&d.DetailsChecked, &checkedAt, &checkedByID, &checkedByName,
+		&d.ForSubmission, &notes,
 		&d.OfficialCopyStatus.ID, &d.OfficialCopyStatus.Label, &d.OfficialCopyStatus.Phase, &d.OfficialCopyStatus.ProgressBucket,
+		&d.OfficialCopyStatusSince, &ocRef,
 		&d.AmendmentStatus.ID, &d.AmendmentStatus.Label, &d.AmendmentStatus.Phase, &d.AmendmentStatus.ProgressBucket,
+		&d.AmendmentStatusSince, &amRef,
 		&d.ApostilleStatus.ID, &d.ApostilleStatus.Label, &d.ApostilleStatus.Phase, &d.ApostilleStatus.ProgressBucket,
+		&d.ApostilleStatusSince, &apRef,
 		&d.TranslationStatus.ID, &d.TranslationStatus.Label, &d.TranslationStatus.Phase, &d.TranslationStatus.ProgressBucket,
+		&d.TranslationStatusSince, &trRef,
 		&d.Version, &d.CreatedAt, &d.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -346,9 +362,19 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 	setString(&d.RecordedBirthDate, recordedBirthDate)
 	setString(&d.RecordedBirthPlace, recordedBirthPlace)
 	setString(&d.Notes, notes)
-	if verifiedAt.Valid {
-		t := verifiedAt.Time.UTC()
-		d.VerifiedAt = &t
+	setString(&d.OfficialCopyReference, ocRef)
+	setString(&d.AmendmentReference, amRef)
+	setString(&d.ApostilleReference, apRef)
+	setString(&d.TranslationReference, trRef)
+	if checkedAt.Valid {
+		t := checkedAt.Time.UTC()
+		d.DetailsCheckedAt = &t
+	}
+	if checkedByID.Valid {
+		d.DetailsCheckedBy = &UserRef{ID: checkedByID.String, Name: checkedByName.String}
+	}
+	for _, t := range []*time.Time{&d.OfficialCopyStatusSince, &d.AmendmentStatusSince, &d.ApostilleStatusSince, &d.TranslationStatusSince} {
+		*t = t.UTC()
 	}
 
 	return &d, nil
