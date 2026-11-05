@@ -149,7 +149,7 @@ export default function DocumentForm({
         />
       </Group>
 
-      <Divider label="Recorded information" labelPosition="left" />
+      <Divider label="As recorded in document" labelPosition="left" />
       <Group grow align="flex-start">
         <TextInput
           label="Recorded Given Name"

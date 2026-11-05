@@ -32,7 +32,7 @@ export default function ClaimLineForm({ initial, isNew, people, saving, error, o
     <Stack>
       {isNew ? (
         <Select
-          label="Root Person"
+          label="Root Ancestor"
           description="The lineage-relevant ancestor this claim line traces from"
           data={personOptions(people)}
           value={values.root_person_id}
@@ -43,7 +43,7 @@ export default function ClaimLineForm({ initial, isNew, people, saving, error, o
         />
       ) : (
         <Text size="sm" c="dimmed">
-          Root person: <strong>{personName(values.root_person_id, people)}</strong>
+          Root ancestor: <strong>{personName(values.root_person_id, people)}</strong>
         </Text>
       )}
       <Select

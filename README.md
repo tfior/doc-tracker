@@ -47,7 +47,7 @@ make frontend     # UI on http://localhost:5173
 Then, once the backend is up:
 
 ```bash
-make seed         # loads a sample case (safe to run more than once)
+make seed         # loads two sample cases (safe to run more than once)
 make create-user  # prompts for email, name and password
 ```
 
