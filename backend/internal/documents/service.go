@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/tfior/doc-tracker/internal/activitylog"
 	"github.com/tfior/doc-tracker/platform"
@@ -79,7 +80,35 @@ func (s *Service) ListDocuments(ctx context.Context, caseID string) ([]Document,
 	if err := s.cases.RequireActive(ctx, caseID); err != nil {
 		return nil, platform.MapNotFound(err, ErrNotFound)
 	}
-	return s.store.ListDocuments(ctx, caseID)
+	docs, err := s.store.ListDocuments(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	for i := range docs {
+		docs[i].derive(now)
+	}
+	return docs, nil
+}
+
+// Progress counts each case's active Documents in the packet by readiness
+// status (domain rule 38). Every case asked about is in the result.
+func (s *Service) Progress(ctx context.Context, caseIDs []string) (map[string]Progress, error) {
+	states, err := s.store.PacketStates(ctx, caseIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]Progress, len(caseIDs))
+	for _, id := range caseIDs {
+		var p Progress
+		for _, st := range states[id] {
+			if status, ok := statusOf(st); ok {
+				p.add(status)
+			}
+		}
+		out[id] = p
+	}
+	return out, nil
 }
 
 func (s *Service) ListDocumentStatuses(ctx context.Context, phase string) ([]DocumentStatus, error) {
@@ -123,7 +152,11 @@ func (s *Service) CreateDocument(ctx context.Context, caseID, personID, docType,
 		}
 		return s.rec.Record(ctx, caseID, "created", d.ID, nil)
 	})
-	return d, err
+	if err != nil {
+		return nil, err
+	}
+	d.derive(time.Now())
+	return d, nil
 }
 
 // UpdateDocument changes a document in one unit of work: its details, its
@@ -172,7 +205,11 @@ func (s *Service) UpdateDocument(ctx context.Context, caseID, docID string, inpu
 		}
 		return s.rec.Record(ctx, caseID, "updated", docID, activitylog.Diff(before.logFields(), d.logFields()))
 	})
-	return d, err
+	if err != nil {
+		return nil, err
+	}
+	d.derive(time.Now())
+	return d, nil
 }
 
 // checkStatuses reports every supplied status that does not belong to its phase.

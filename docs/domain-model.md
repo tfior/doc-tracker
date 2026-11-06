@@ -217,7 +217,7 @@ Defines the status options available for each phase of a Document. Each status b
 | label | text | display name |
 | phase | enum | official_copy, amendment, apostille, translation, any — `any` statuses appear in all four phase pickers |
 | is_system | boolean | true for seeded system statuses |
-| system_key | text? | set only for the four phase-default statuses the backend references at document creation; null for all others |
+| system_key | text? | set only for the system statuses the backend references by key: the four phase defaults, used at document creation, and Not Required (`not_required`), which on the official copy phase means a Document is not needed; null for all others |
 | progress_bucket | enum | not_started, in_progress, complete |
 | created_at | timestamp | |
 
@@ -238,7 +238,7 @@ Defines the status options available for each phase of a Document. Each status b
 | Sent | translation | — | in_progress |
 | Ready for Review | any | — | in_progress |
 | Complete | any | — | complete |
-| Not Required | any | — | complete |
+| Not Required | any | not_required | complete |
 
 The `apostille` phase is labelled "Apostille / Legalization" in the UI. It also covers consular legalization, the equivalent step for countries outside the Apostille Convention.
 
@@ -253,7 +253,7 @@ A specific official record belonging to a Person, optionally grouped under a Lif
 
 Each of the four phases carries three things: its status, the date it entered that status, and an optional reference such as an order or case number.
 
-Several values are derived, not stored: the readiness status (see Readiness under Domain Rules), the age of the current copy, and the number of copies required.
+Several values are derived, not stored: whether the Document is needed, its readiness status (see Readiness under Domain Rules), the age of the current copy, and the number of copies required.
 
 A Document may be reassigned to a different LifeEvent within the same Case, including one belonging to a different Person. When reassigned cross-person, `person_id` and `life_event_id` are updated atomically. Setting `life_event_id` to null ungrouped the Document under the Person with no event association.
 
@@ -401,21 +401,20 @@ A **supporting** file is anything else worth keeping with the document, such as 
 
 ### Readiness
 
-35. Every Document has a readiness status derived from its phase statuses and `details_checked`:
+35. A Document is in the packet when it is for submission and needed; it is needed unless its official copy phase is "Not Required" (rule 29). Every Document in the packet has a readiness status, which says whether it is ready to be submitted, derived from its phase statuses and `details_checked`:
 
     | Status | Rule |
     |---|---|
-    | not_needed | The official_copy phase is "Not Required" |
-    | ready | The document is needed, all four phases are in the `complete` progress bucket (Complete or Not Required), and `details_checked` is true |
-    | not_started | The document is needed and all four phases are in the `not_started` progress bucket |
+    | ready | All four phases are in the `complete` progress bucket (Complete or Not Required), and `details_checked` is true |
+    | not_started | All four phases are in the `not_started` progress bucket |
     | in_progress | Anything else |
 
-36. A needed Document that is not ready reports why: each phase that is not complete, and whether the details have been checked.
+36. A Document in the packet that is not ready reports why: each phase that is not complete, and whether the details have been checked.
 37. Readiness does not depend on whether a file has been uploaded. A ready Document with no submission file is reported by the Application Files export.
-38. Case progress is the count of the case's needed Documents in each readiness status.
-39. The outstanding list for a case contains every needed Document that is not ready. Each appears once, under the earliest thing it is waiting on, in this order: official copy, amendment, apostille, translation, details check. The list can be grouped by that stage or by Person, and sorted by how long each Document has been waiting.
-40. A Document with `for_submission` set to false is tracked like any other, with its own readiness, but belongs to no Application's Documents and is left out of the Application Files export. It appears in the All Files export.
-41. The age of a Document's current copy is derived from `issue_date` when that is a full date. It is shown wherever an Application's Documents are listed. The app applies no age limit; whether a copy is too old for a venue is the user's judgement.
+38. Case progress is the count of the case's active Documents in the packet in each readiness status. A Case with no Documents in the packet reports zero in every status.
+39. The outstanding list for a case contains every Document in the packet that is not ready. Each appears once, under the earliest thing it is waiting on, in this order: official copy, amendment, apostille, translation, details check. It has been waiting since the phase it is waiting on entered its current status; when it is waiting on the details check, since the last of its phases entered its current status. The list can be grouped by that stage or by Person, and sorted by how long each Document has been waiting.
+40. A Document that is not for submission, or not needed, is outside the packet. It is tracked like any other, but has no readiness, is not counted in case progress or listed as outstanding, belongs to no Application's Documents, and is left out of the Application Files export. It appears in the All Files export.
+41. The age of a Document's current copy is derived from `issue_date` when that is a full date. It is reported in days and need only be broadly accurate. It is shown wherever an Application's Documents are listed. The app applies no age limit; whether a copy is too old for a venue is the user's judgement.
 
 ### Files
 

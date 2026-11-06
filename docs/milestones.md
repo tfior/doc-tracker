@@ -243,24 +243,24 @@ After this milestone the app answers "what is still outstanding on this case?".
 
 ### Acceptance Criteria
 
-- Every document shows whether it is ready and, if not, why
+- Every document in the packet shows whether it is ready and, if not, why
 - A case shows how many of its documents are ready, and lists the rest by what they are waiting on
 - A request's date and reference number are recorded, and the time it has been waiting is visible
 
 ### Backend
 
 - [x] `is_verified` becomes `details_checked`, recording who and when; setting it on create works; its timestamp no longer changes on unrelated saves; a change to the recorded details clears it
-- [ ] Readiness on every document: status, the stage it is waiting on, and reasons
-- [ ] Progress counts on every case, in the list and the detail
+- [x] Readiness on every document in the packet: status, the stage it is waiting on and since when, and reasons
+- [x] Progress counts on every case, in the list and the detail
 - [x] A since date on each phase, set automatically and correctable; a reference on each phase
 - [x] The `for_submission` flag
 - [x] Document types: non-naturalization certificate, divorce record, court order
-- [ ] The age of a document's current copy
+- [x] The age of a document's current copy
 
 ### Frontend
 
-- [ ] Documents table: readiness with reasons, and time in the current status; the phase labelled "Apostille / Legalization"
-- [ ] Case overview: progress summary and the outstanding list by stage, sortable by time waiting; every row names its person
+- [x] Documents table: readiness with reasons, and time in the current status; the phase labelled "Apostille / Legalization"
+- [x] Case overview: progress summary and the outstanding list by stage, sortable by time waiting; every row names its person
 - [x] Document form: "Details checked against scan" with who and when; since date and reference per phase; "for submission"
 
 ---

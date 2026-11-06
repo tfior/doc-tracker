@@ -123,22 +123,27 @@ This prevents one user's save from silently overwriting another's.
 
 Responses include every derived value the interface needs. Clients do not recompute them.
 
-- Every Document carries `readiness`: its status, the stage it is waiting on, and the reasons it is not ready. Reasons are machine-readable codes; the frontend supplies the wording.
+- Every Document carries `needed`. Every Document in the packet (for submission and needed) carries `readiness`: its status, the stage it is waiting on, when it started waiting and for how many days, and the reasons it is not ready. A Document outside the packet has `readiness: null`. Reasons are machine-readable codes; the frontend supplies the wording.
 
   ```json
+  "needed": true,
   "readiness": {
     "status": "in_progress",
     "waiting_on": "apostille",
+    "waiting_since": "2026-10-02T09:14:00Z",
+    "waiting_days": 34,
     "reasons": ["apostille_incomplete", "translation_incomplete", "details_not_checked"]
   }
   ```
 
-- Every Document also carries, for each phase, how long it has been in its current status; the age of its current copy, when the issue date allows; and the number of copies required.
+  `status` is `ready`, `in_progress` or `not_started`. `waiting_on` is `official_copy`, `amendment`, `apostille`, `translation` or `details_check`, and null when the Document is ready; a Document is on the case's outstanding list exactly when it is set. Reason codes are `<phase>_incomplete` for each phase not complete, and `details_not_checked`.
+
+- Every Document also carries, for each phase, the whole days it has been in its current status (`*_days_in_status`); the age of its current copy in days (`copy_age_days`), when the issue date is a full date; and the number of copies required.
 - Every Application carries its Documents, in packet order, and its status with the number ready out of the total.
-- Every Case carries `progress`, in both the case list and the case detail: the count of its Documents in each readiness status.
+- Every Case carries `progress`, in both the case list and the case detail: the count of its Documents in the packet in each readiness status.
 
   ```json
-  "progress": { "ready": 5, "in_progress": 6, "not_started": 1, "not_needed": 2 }
+  "progress": { "ready": 5, "in_progress": 6, "not_started": 1 }
   ```
 
 - A recorded age is returned with the birth window it implies, when that can be calculated.

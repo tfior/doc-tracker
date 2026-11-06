@@ -122,3 +122,23 @@ export function startOfLocalDay(day: string): string {
 export function formatTimestampDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
+
+/** A number of days, for example "1 day" or "12 days". */
+export function formatDays(days: number): string {
+  return days === 1 ? '1 day' : `${days} days`;
+}
+
+/**
+ * An age in days, roughly: days under a month, then months, then years and
+ * months, for example "3 weeks", "about 4 months", "about 1 year 2 months".
+ */
+export function formatAge(days: number): string {
+  if (days < 14) return formatDays(days);
+  if (days < 30) return `${Math.floor(days / 7)} weeks`;
+  const months = Math.max(1, Math.floor(days / 30.44));
+  if (months < 12) return `about ${months === 1 ? '1 month' : `${months} months`}`;
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  const y = years === 1 ? '1 year' : `${years} years`;
+  return `about ${y}${rest ? ` ${rest === 1 ? '1 month' : `${rest} months`}` : ''}`;
+}

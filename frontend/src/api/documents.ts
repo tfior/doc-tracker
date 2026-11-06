@@ -17,6 +17,19 @@ export interface UserRef {
   name: string;
 }
 
+/** The stages a Document in the packet can be waiting on, earliest first. */
+export type Stage = 'official_copy' | 'amendment' | 'apostille' | 'translation' | 'details_check';
+
+/** Whether a Document in the packet is ready to submit, and if not, why. */
+export interface Readiness {
+  status: 'ready' | 'in_progress' | 'not_started';
+  /** Set exactly when the Document is on the case's outstanding list. */
+  waiting_on: Stage | null;
+  waiting_since: string | null;
+  waiting_days: number | null;
+  reasons: string[];
+}
+
 export interface Document {
   id: string;
   case_id: string;
@@ -48,6 +61,15 @@ export interface Document {
   translation_status: PhaseStatus;
   translation_status_since: string;
   translation_reference: string | null;
+  needed: boolean;
+  /** Null for a Document outside the packet: not needed, or not for submission. */
+  readiness: Readiness | null;
+  official_copy_days_in_status: number;
+  amendment_days_in_status: number;
+  apostille_days_in_status: number;
+  translation_days_in_status: number;
+  /** Null unless the issue date is a full date. */
+  copy_age_days: number | null;
   version: number;
   created_at: string;
   updated_at: string;
