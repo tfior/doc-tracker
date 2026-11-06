@@ -8,6 +8,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 
@@ -41,6 +42,7 @@ func NewHandler(db *sql.DB) http.Handler {
 	documentsSvc := documents.NewService(documents.NewStore(db), db, actlogSvc, casesSvc, peopleSvc, lifeEventsSvc,
 		auth.UserIDFromContext)
 	lifeEventsSvc.SetDocumentMover(documentsSvc)
+	casesSvc.SetProgressCounter(progressCounter{documentsSvc})
 	peopleSvc.SetVitalEvents(lifeEventsSvc)
 	claimLinesSvc := claimlines.NewService(claimlines.NewStore(db), db, actlogSvc, casesSvc, peopleSvc)
 	trashSvc := trash.NewService(trash.NewStore(db), db, trash.Owners{
@@ -68,4 +70,20 @@ func NewHandler(db *sql.DB) http.Handler {
 	}
 
 	return auth.Middleware(authSvc)(platform.ValidIDs(mux))
+}
+
+// progressCounter gives the cases service the documents service's progress
+// counts in the cases module's own type.
+type progressCounter struct{ docs *documents.Service }
+
+func (p progressCounter) Progress(ctx context.Context, caseIDs []string) (map[string]cases.Progress, error) {
+	counts, err := p.docs.Progress(ctx, caseIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]cases.Progress, len(counts))
+	for id, c := range counts {
+		out[id] = cases.Progress{Ready: c.Ready, InProgress: c.InProgress, NotStarted: c.NotStarted}
+	}
+	return out, nil
 }

@@ -6,17 +6,20 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { Title, Text, Loader, Group, Badge, Stack, Button } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { caseQuery, lifeEventsQuery, peopleQuery } from '../../api/queries';
+import { caseQuery, documentsQuery, lifeEventsQuery, peopleQuery } from '../../api/queries';
 import ErrorMessage from '../../components/ErrorMessage';
 import { CASE_STATUS_COLOR, caseStatusLabel } from './options';
 import CaseFormModal from './CaseFormModal';
 import ClaimLineSummaryCard from './ClaimLineSummaryCard';
 import EventsMissingDocumentsCard from './EventsMissingDocumentsCard';
+import DocumentProgressCard from './DocumentProgressCard';
+import OutstandingDocumentsCard from './OutstandingDocumentsCard';
 
 export default function CaseOverviewPage() {
   const { caseId } = useParams<{ caseId: string }>();
   const detailQuery = useQuery(caseQuery(caseId!));
   const eventsQuery = useQuery(lifeEventsQuery(caseId!));
+  const docsQuery = useQuery(documentsQuery(caseId!));
   const people = useQuery(peopleQuery(caseId!)).data?.items ?? [];
   const [editOpened, editHandlers] = useDisclosure(false);
 
@@ -41,7 +44,12 @@ export default function CaseOverviewPage() {
           </Group>
         </Group>
 
-        <ClaimLineSummaryCard summary={detail.claim_line_summary} />
+        <Group align="flex-start">
+          <DocumentProgressCard progress={detail.progress} />
+          <ClaimLineSummaryCard summary={detail.claim_line_summary} />
+        </Group>
+        <ErrorMessage error={docsQuery.error} title="Could not load documents" />
+        {docsQuery.data && <OutstandingDocumentsCard documents={docsQuery.data.items} people={people} />}
         <ErrorMessage error={eventsQuery.error} title="Could not load life events" />
         {eventsQuery.data && <EventsMissingDocumentsCard events={eventsQuery.data.items} people={people} />}
       </Stack>

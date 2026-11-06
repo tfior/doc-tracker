@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/tfior/doc-tracker/platform"
 )
 
@@ -38,6 +39,7 @@ type Store interface {
 	LockEventDocuments(ctx context.Context, caseID, eventID string) error
 	Restore(ctx context.Context, caseID, id string) error
 	PermanentDelete(ctx context.Context, caseID, id string) error
+	PacketStates(ctx context.Context, caseIDs []string) (map[string][]packetState, error)
 }
 
 type store struct {
@@ -59,7 +61,7 @@ const selectDocuments = `
 		d.recorded_birth_date, d.recorded_birth_place,
 		d.details_checked, d.details_checked_at, u.id::text, u.first_name || ' ' || u.last_name,
 		d.for_submission, d.notes,
-		oc.id::text, oc.label, oc.phase::text, oc.progress_bucket::text, d.official_copy_status_since, d.official_copy_reference,
+		oc.id::text, oc.label, oc.phase::text, oc.progress_bucket::text, oc.system_key, d.official_copy_status_since, d.official_copy_reference,
 		am.id::text, am.label, am.phase::text, am.progress_bucket::text, d.amendment_status_since, d.amendment_reference,
 		ap.id::text, ap.label, ap.phase::text, ap.progress_bucket::text, d.apostille_status_since, d.apostille_reference,
 		tr.id::text, tr.label, tr.phase::text, tr.progress_bucket::text, d.translation_status_since, d.translation_reference,
@@ -331,6 +333,7 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 	var checkedAt sql.NullTime
 	var checkedByID, checkedByName sql.NullString
 	var ocRef, amRef, apRef, trRef sql.NullString
+	var ocKey sql.NullString
 
 	if err := scan(
 		&d.ID, &d.CaseID, &d.PersonID, &lifeEventID,
@@ -340,7 +343,7 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 		&recordedBirthDate, &recordedBirthPlace,
 		&d.DetailsChecked, &checkedAt, &checkedByID, &checkedByName,
 		&d.ForSubmission, &notes,
-		&d.OfficialCopyStatus.ID, &d.OfficialCopyStatus.Label, &d.OfficialCopyStatus.Phase, &d.OfficialCopyStatus.ProgressBucket,
+		&d.OfficialCopyStatus.ID, &d.OfficialCopyStatus.Label, &d.OfficialCopyStatus.Phase, &d.OfficialCopyStatus.ProgressBucket, &ocKey,
 		&d.OfficialCopyStatusSince, &ocRef,
 		&d.AmendmentStatus.ID, &d.AmendmentStatus.Label, &d.AmendmentStatus.Phase, &d.AmendmentStatus.ProgressBucket,
 		&d.AmendmentStatusSince, &amRef,
@@ -376,6 +379,7 @@ func scanDocument(scan func(...any) error) (*Document, error) {
 	for _, t := range []*time.Time{&d.OfficialCopyStatusSince, &d.AmendmentStatusSince, &d.ApostilleStatusSince, &d.TranslationStatusSince} {
 		*t = t.UTC()
 	}
+	d.officialCopyKey = ocKey.String
 
 	return &d, nil
 }
@@ -601,4 +605,44 @@ func (s *store) StatusPhase(ctx context.Context, statusID string) (string, error
 		return "", fmt.Errorf("status phase: %w", err)
 	}
 	return phase, nil
+}
+
+// PacketStates reads, for each case asked about, what readiness needs to know
+// about each of its active Documents.
+func (s *store) PacketStates(ctx context.Context, caseIDs []string) (map[string][]packetState, error) {
+	out := map[string][]packetState{}
+	if len(caseIDs) == 0 {
+		return out, nil
+	}
+	rows, err := platform.Conn(ctx, s.db).QueryContext(ctx, `
+		SELECT d.case_id::text, oc.system_key, d.for_submission, d.details_checked,
+			oc.progress_bucket::text, am.progress_bucket::text, ap.progress_bucket::text, tr.progress_bucket::text
+		FROM documents d
+		JOIN active_documents a ON a.id = d.id
+		JOIN document_statuses oc ON oc.id = d.official_copy_status_id
+		JOIN document_statuses am ON am.id = d.amendment_status_id
+		JOIN document_statuses ap ON ap.id = d.apostille_status_id
+		JOIN document_statuses tr ON tr.id = d.translation_status_id
+		WHERE d.case_id = ANY($1::uuid[])`,
+		pq.Array(caseIDs))
+	if err != nil {
+		return nil, fmt.Errorf("query packet states: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var caseID string
+		var ocKey sql.NullString
+		var forSubmission, checked bool
+		var buckets [4]string
+		if err := rows.Scan(&caseID, &ocKey, &forSubmission, &checked,
+			&buckets[0], &buckets[1], &buckets[2], &buckets[3]); err != nil {
+			return nil, fmt.Errorf("scan packet state: %w", err)
+		}
+		out[caseID] = append(out[caseID], packetStateOf(ocKey.String, forSubmission, checked, buckets))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate packet states: %w", err)
+	}
+	return out, nil
 }

@@ -13,10 +13,11 @@ import (
 )
 
 type Service struct {
-	store Store
-	db    *sql.DB
-	log   *activitylog.Service
-	rec   *activitylog.Recorder
+	store    Store
+	progress ProgressCounter
+	db       *sql.DB
+	log      *activitylog.Service
+	rec      *activitylog.Recorder
 }
 
 func NewService(store Store, db *sql.DB, log *activitylog.Service) *Service {
@@ -24,12 +25,43 @@ func NewService(store Store, db *sql.DB, log *activitylog.Service) *Service {
 		func(ctx context.Context, _, caseID string) (string, error) { return store.LogName(ctx, caseID) })}
 }
 
-func (s *Service) ListCases(ctx context.Context, page, perPage int) ([]Case, int, error) {
-	return s.store.ListCases(ctx, page, perPage)
+// SetProgressCounter supplies the documents module's progress counts. It is
+// set after construction because the documents service depends on this one.
+func (s *Service) SetProgressCounter(p ProgressCounter) {
+	s.progress = p
+}
+
+func (s *Service) ListCases(ctx context.Context, page, perPage int) ([]CaseSummary, int, error) {
+	list, total, err := s.store.ListCases(ctx, page, perPage)
+	if err != nil {
+		return nil, 0, err
+	}
+	ids := make([]string, len(list))
+	for i, c := range list {
+		ids[i] = c.ID
+	}
+	progress, err := s.progress.Progress(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]CaseSummary, len(list))
+	for i, c := range list {
+		items[i] = CaseSummary{Case: c, Progress: progress[c.ID]}
+	}
+	return items, total, nil
 }
 
 func (s *Service) GetCase(ctx context.Context, caseID string) (*CaseDetail, error) {
-	return s.store.GetCase(ctx, caseID)
+	d, err := s.store.GetCase(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	progress, err := s.progress.Progress(ctx, []string{caseID})
+	if err != nil {
+		return nil, err
+	}
+	d.Progress = progress[caseID]
+	return d, nil
 }
 
 // RequireActive returns an error wrapping platform.ErrNotFound unless the case

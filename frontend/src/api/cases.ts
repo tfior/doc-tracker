@@ -23,11 +23,24 @@ export interface ClaimLineSummary {
   eligible: number;
 }
 
-export interface CaseDetail extends Case {
-  claim_line_summary: ClaimLineSummary;
+/** The count of a case's Documents in the packet in each readiness status. */
+export interface Progress {
+  ready: number;
+  in_progress: number;
+  not_started: number;
 }
 
-interface CasePage extends Items<Case> {
+/** A case as the case list shows it. */
+export interface CaseSummary extends Case {
+  progress: Progress;
+}
+
+export interface CaseDetail extends Case {
+  claim_line_summary: ClaimLineSummary;
+  progress: Progress;
+}
+
+interface CasePage extends Items<CaseSummary> {
   page: number;
   per_page: number;
 }
@@ -36,8 +49,8 @@ interface CasePage extends Items<Case> {
 const PER_PAGE = 200;
 
 /** Fetches every case, one page after another. */
-export async function listCases(): Promise<Items<Case>> {
-  const items: Case[] = [];
+export async function listCases(): Promise<Items<CaseSummary>> {
+  const items: CaseSummary[] = [];
   for (let page = 1; ; page++) {
     const res = await get<CasePage>('/cases', { page, per_page: PER_PAGE });
     items.push(...res.items);

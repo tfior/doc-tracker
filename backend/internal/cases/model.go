@@ -5,6 +5,7 @@
 package cases
 
 import (
+	"context"
 	"time"
 
 	"github.com/tfior/doc-tracker/internal/activitylog"
@@ -29,9 +30,30 @@ type ClaimLineSummary struct {
 	Eligible         int `json:"eligible"`
 }
 
+// CaseSummary is a case as the case list shows it.
+type CaseSummary struct {
+	Case
+	Progress Progress `json:"progress"`
+}
+
 type CaseDetail struct {
 	Case
 	ClaimLineSummary ClaimLineSummary `json:"claim_line_summary"`
+	Progress         Progress         `json:"progress"`
+}
+
+// Progress is the count of a case's Documents in the packet in each readiness
+// status.
+type Progress struct {
+	Ready      int `json:"ready"`
+	InProgress int `json:"in_progress"`
+	NotStarted int `json:"not_started"`
+}
+
+// ProgressCounter counts each case's Documents in the packet by readiness.
+// The documents module owns the rule; the cases module only reports it.
+type ProgressCounter interface {
+	Progress(ctx context.Context, caseIDs []string) (map[string]Progress, error)
 }
 
 // logFields is what the activity log compares when a case changes.

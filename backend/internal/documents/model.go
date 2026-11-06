@@ -109,9 +109,22 @@ type Document struct {
 	TranslationStatusSince  time.Time   `json:"translation_status_since"`
 	TranslationReference    *string     `json:"translation_reference"`
 
+	// Derived when the document is read; see derive.
+	Needed                   bool       `json:"needed"`
+	Readiness                *Readiness `json:"readiness"`
+	OfficialCopyDaysInStatus int        `json:"official_copy_days_in_status"`
+	AmendmentDaysInStatus    int        `json:"amendment_days_in_status"`
+	ApostilleDaysInStatus    int        `json:"apostille_days_in_status"`
+	TranslationDaysInStatus  int        `json:"translation_days_in_status"`
+	CopyAgeDays              *int       `json:"copy_age_days"`
+
 	Version   int       `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// officialCopyKey is the system key of the official copy status, read so
+	// that derive can tell whether the document is needed.
+	officialCopyKey string
 }
 
 // MovedDocument identifies a document whose person changed because its life
